@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mess_app/core/utils/constants/color_constants.dart';
 
 class CustomCheckbox extends StatelessWidget {
   final bool value;
@@ -13,8 +14,9 @@ class CustomCheckbox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Checkbox(
-      activeColor: ColorConstants.primaryOrange,
+      activeColor: ColorConstants.forestGreen,
       checkColor: Colors.white,
+      side: const BorderSide(color: ColorConstants.borderGrey, width: 1.5),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       value: value,
       onChanged: (value) {

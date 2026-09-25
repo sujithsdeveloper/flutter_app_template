@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import 'package:mess_app/core/utils/constants/color_constants.dart';
 
 class CustomTextField extends StatefulWidget {
   final String hintText;
@@ -63,7 +64,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: ColorConstants.textPrimary,
+              color: ColorConstants.lightTextPrimary,
             ),
           ),
           const SizedBox(height: 8),
@@ -84,15 +85,15 @@ class _CustomTextFieldState extends State<CustomTextField> {
           autofocus: widget.autofocus,
           style: const TextStyle(
             fontSize: 16,
-            color: ColorConstants.textPrimary,
+            color: ColorConstants.lightTextPrimary,
           ),
-          cursorColor: ColorConstants.primaryYellow,
+          cursorColor: ColorConstants.forestGreen,
           decoration: InputDecoration(
             filled: true,
             hintText: widget.hintText,
-            fillColor: ColorConstants.fieldFillColor,
+            fillColor: ColorConstants.inputFill,
             hintStyle: const TextStyle(
-              color: ColorConstants.textHint,
+              color: ColorConstants.lightTextSecondary,
               fontSize: 15,
             ),
             prefixIcon: widget.prefixIcon != null
@@ -107,7 +108,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
                       icon: _obscureText
                           ? HugeIcons.strokeRoundedViewOff
                           : HugeIcons.strokeRoundedView,
-                      color: ColorConstants.textHint,
+                      color: ColorConstants.lightTextSecondary,
                     ),
                     onPressed: () {
                       setState(() {
@@ -119,46 +120,46 @@ class _CustomTextFieldState extends State<CustomTextField> {
 
             contentPadding:
                 widget.contentPadding ??
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               borderSide: const BorderSide(
-                color: ColorConstants.borderColor,
+                color: ColorConstants.borderGrey,
                 width: 1.5,
               ),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               borderSide: const BorderSide(
-                color: ColorConstants.borderColor,
+                color: ColorConstants.borderGrey,
                 width: 1.5,
               ),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               borderSide: const BorderSide(
-                color: ColorConstants.primaryYellow,
-                width: 2,
+                color: ColorConstants.forestGreen,
+                width: 1.8,
               ),
             ),
             errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               borderSide: const BorderSide(
                 color: ColorConstants.errorColor,
                 width: 1.5,
               ),
             ),
             focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               borderSide: const BorderSide(
                 color: ColorConstants.errorColor,
-                width: 2,
+                width: 1.8,
               ),
             ),
             disabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               borderSide: BorderSide(
-                color: ColorConstants.borderColor.withValues(alpha: 0.5),
+                color: ColorConstants.borderGrey.withValues(alpha: 0.5),
                 width: 1.5,
               ),
             ),

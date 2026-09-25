@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
+import 'package:mess_app/core/utils/constants/asset_constants.dart';
 
 class LoadingIndicator extends StatelessWidget {
   const LoadingIndicator({super.key});

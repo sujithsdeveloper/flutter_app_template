@@ -1,4 +1,5 @@
 import 'dart:developer';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -22,6 +23,7 @@ class AppConfigs {
   static Future<void> setHighestRefreshRate() async {
     try {
       // Set the highest available mode
+      if (!Platform.isAndroid) return;
       await FlutterDisplayMode.setHighRefreshRate();
       log("High refresh rate mode set.");
     } catch (e) {

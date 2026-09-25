@@ -4,4 +4,6 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Cleartext also enabled in main for release API at 65.0.109.222:8990. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>
