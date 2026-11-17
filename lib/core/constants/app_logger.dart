@@ -8,7 +8,7 @@ class AppLogger {
       lineLength: 120,
       colors: false,
       printEmojis: true,
-      printTime: true,
+      dateTimeFormat: DateTimeFormat.onlyTimeAndSinceStart,
     ),
   );
 
@@ -19,7 +19,7 @@ class AppLogger {
       lineLength: 120,
       colors: false,
       printEmojis: true,
-      printTime: true,
+      dateTimeFormat: DateTimeFormat.onlyTimeAndSinceStart,
     ),
   );
 
@@ -31,7 +31,7 @@ class AppLogger {
       colors: true,
 
       printEmojis: true,
-      printTime: true,
+      dateTimeFormat: DateTimeFormat.onlyTimeAndSinceStart,
     ),
   );
 

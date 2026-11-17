@@ -21,12 +21,12 @@ class FieldSyncService {
     required WorkerPlotRepository workerPlotRepository,
     required TreeTaskRepository taskRepository,
     required SyncRepository syncRepository,
-  })  : _api = api,
-        _plots = plotRepository,
-        _workers = workerRepository,
-        _workerPlots = workerPlotRepository,
-        _tasks = taskRepository,
-        _sync = syncRepository;
+  }) : _api = api,
+       _plots = plotRepository,
+       _workers = workerRepository,
+       _workerPlots = workerPlotRepository,
+       _tasks = taskRepository,
+       _sync = syncRepository;
 
   final FieldApiService _api;
   final PlotRepository _plots;
@@ -113,10 +113,10 @@ class FieldSyncService {
       location: (location != null && location.isNotEmpty)
           ? location
           : (regionName != null && regionName.isNotEmpty)
-              ? regionName
-              : (owner != null && owner.isNotEmpty)
-                  ? owner
-                  : 'Unspecified',
+          ? regionName
+          : (owner != null && owner.isNotEmpty)
+          ? owner
+          : 'Unspecified',
       district: (m['district'] as String?)?.isEmpty ?? true
           ? null
           : m['district'] as String?,
@@ -125,7 +125,8 @@ class FieldSyncService {
       areaHectares: hectares,
       treeCount: (m['treeCount'] as num?)?.toInt() ?? 0,
       status: PlotStatus.healthy,
-      assignedVolunteerId: (m['assignedVolunteerId'] as String?)?.isEmpty ?? true
+      assignedVolunteerId:
+          (m['assignedVolunteerId'] as String?)?.isEmpty ?? true
           ? null
           : m['assignedVolunteerId'] as String?,
       syncStatus: SyncStatus.synced,
@@ -168,11 +169,14 @@ class FieldSyncService {
     final workerNameRaw = (m['workerName'] as String?)?.trim();
     final sponsorshipRaw = (m['sponsorshipId'] as String?)?.trim();
     final intentRaw = (m['sponsorIntent'] as String?)?.trim();
+    final programNameRaw = (m['programName'] as String?)?.trim();
     return TreeTaskModel(
       id: id,
       serverId: id,
       plotId: (m['plotId'] ?? '').toString(),
-      plotName: (plotNameRaw == null || plotNameRaw.isEmpty) ? null : plotNameRaw,
+      plotName: (plotNameRaw == null || plotNameRaw.isEmpty)
+          ? null
+          : plotNameRaw,
       species: (m['species'] ?? '').toString(),
       latitude: (m['lat'] as num?)?.toDouble() ?? 0,
       longitude: (m['lng'] as num?)?.toDouble() ?? 0,
@@ -182,8 +186,12 @@ class FieldSyncService {
       adminNotes: (m['adminNotes'] as String?)?.isEmpty ?? true
           ? null
           : m['adminNotes'] as String?,
-      sponsorIntent:
-          (intentRaw == null || intentRaw.isEmpty) ? null : intentRaw,
+      sponsorIntent: (intentRaw == null || intentRaw.isEmpty)
+          ? null
+          : intentRaw,
+      programName: (programNameRaw == null || programNameRaw.isEmpty)
+          ? null
+          : programNameRaw,
       targetDate: (target != null && target.isNotEmpty)
           ? DateTime.tryParse(target)
           : null,
@@ -193,18 +201,25 @@ class FieldSyncService {
       workerId: (m['workerId'] as String?)?.isEmpty ?? true
           ? null
           : m['workerId'] as String?,
-      workerName:
-          (workerNameRaw == null || workerNameRaw.isEmpty) ? null : workerNameRaw,
+      workerName: (workerNameRaw == null || workerNameRaw.isEmpty)
+          ? null
+          : workerNameRaw,
       photoPath: (m['photoUrl'] as String?)?.isEmpty ?? true
           ? null
           : m['photoUrl'] as String?,
       treeId: (treeIdRaw == null || treeIdRaw.isEmpty) ? null : treeIdRaw,
-      regionId: (regionIdRaw == null || regionIdRaw.isEmpty) ? null : regionIdRaw,
-      regionName:
-          (regionNameRaw == null || regionNameRaw.isEmpty) ? null : regionNameRaw,
-      sponsorshipId:
-          (sponsorshipRaw == null || sponsorshipRaw.isEmpty) ? null : sponsorshipRaw,
-      taskStatus: TaskStatus.fromValue((m['taskStatus'] ?? 'pending').toString()),
+      regionId: (regionIdRaw == null || regionIdRaw.isEmpty)
+          ? null
+          : regionIdRaw,
+      regionName: (regionNameRaw == null || regionNameRaw.isEmpty)
+          ? null
+          : regionNameRaw,
+      sponsorshipId: (sponsorshipRaw == null || sponsorshipRaw.isEmpty)
+          ? null
+          : sponsorshipRaw,
+      taskStatus: TaskStatus.fromValue(
+        (m['taskStatus'] ?? 'pending').toString(),
+      ),
       syncStatus: SyncStatus.synced,
       createdAt: _parseTime(m['createdAt']) ?? now,
       updatedAt: _parseTime(m['updatedAt']) ?? now,

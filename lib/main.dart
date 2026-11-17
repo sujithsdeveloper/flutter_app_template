@@ -1,9 +1,10 @@
-import 'dart:io';
-
+import 'package:device_preview/device_preview.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:mess_app/core/database/app_database.dart';
+import 'package:mess_app/core/database/database_platform.dart';
 import 'package:mess_app/core/service_locator/di.dart';
 import 'package:mess_app/core/utils/configs/app_configs.dart';
 import 'package:mess_app/core/utils/configs/providers.dart';
@@ -20,6 +21,9 @@ Future<void> main() async {
     // Fall back to resolveApiBaseUrl() default when .env is missing.
   }
 
+  // Select the browser-backed SQLite implementation before opening the DB.
+  await configureDatabasePlatform();
+
   // DB must be open before DI setup so repositories can be registered.
   await AppDatabase.instance.init();
 
@@ -27,10 +31,16 @@ Future<void> main() async {
 
   await Future.wait([
     AppConfigs.setOrentation(),
-    if (Platform.isAndroid) ...[AppConfigs.setHighestRefreshRate()],
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+      AppConfigs.setHighestRefreshRate(),
   ]);
 
-  runApp(const OmyEarthApp());
+  runApp(
+    DevicePreview(
+      enabled: kIsWeb && kDebugMode,
+      builder: (_) => const OmyEarthApp(),
+    ),
+  );
 }
 
 class OmyEarthApp extends StatelessWidget {
@@ -41,6 +51,8 @@ class OmyEarthApp extends StatelessWidget {
     return MultiBlocProvider(
       providers: Providers.providers,
       child: MaterialApp(
+        locale: DevicePreview.locale(context),
+        builder: DevicePreview.appBuilder,
         debugShowCheckedModeBanner: false,
         title: 'Omy Earth',
         themeMode: ThemeMode.light,

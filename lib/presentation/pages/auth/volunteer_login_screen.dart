@@ -152,8 +152,12 @@ class _VolunteerLoginScreenState extends State<VolunteerLoginScreen> {
                         color: ColorConstants.lightTextSecondary,
                       ),
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty) return t.invalidEmail;
-                        if (!v.contains('@')) return t.invalidEmail;
+                        if (v == null || v.trim().isEmpty) {
+                          return t.invalidEmail;
+                        }
+                        if (!v.contains('@')) {
+                          return t.invalidEmail;
+                        }
                         return null;
                       },
                     ),

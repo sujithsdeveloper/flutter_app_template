@@ -4,9 +4,13 @@ import 'package:mess_app/core/network/app_interceptors.dart';
 import 'package:mess_app/core/network/logger_interceptor.dart';
 
 const _defaultBaseUrl = 'http://65.0.109.222:8990';
+const _definedBaseUrl = String.fromEnvironment('BASE_URL');
 
 String resolveApiBaseUrl() {
-  var base = (dotenv.env['BASE_URL'] ?? _defaultBaseUrl).trim();
+  var base = _definedBaseUrl.trim();
+  if (base.isEmpty) {
+    base = (dotenv.env['BASE_URL'] ?? _defaultBaseUrl).trim();
+  }
   if (base.isEmpty) {
     base = _defaultBaseUrl;
   }

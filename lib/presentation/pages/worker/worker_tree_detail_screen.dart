@@ -45,7 +45,7 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final updates = await _repo.getForTree(widget.tree.id);
-    if (mounted) setState(() { _updates = updates; _loading = false; });
+    if (mounted) { setState(() { _updates = updates; _loading = false; }); }
   }
 
   GrowthStage get _currentStage =>

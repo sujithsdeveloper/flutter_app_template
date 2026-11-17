@@ -1,11 +1,13 @@
 import 'dart:convert';
-import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 
 import 'package:mess_app/core/constants/app_logger.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 
 import 'db_constants.dart';
+import 'sample_photo_writer.dart';
 
 /// Singleton SQLite database for the app.
 ///
@@ -121,6 +123,13 @@ class AppDatabase {
               );
             } catch (_) {}
           }
+        case 11:
+          try {
+            await db.execute(
+              'ALTER TABLE ${DbConstants.tableTreeTasks} ADD COLUMN '
+              '${DbConstants.colProgramName} TEXT',
+            );
+          } catch (_) {}
         default:
           break;
       }
@@ -295,6 +304,7 @@ class AppDatabase {
       ${DbConstants.colNotes}         TEXT,
       ${DbConstants.colAdminNotes}    TEXT,
       ${DbConstants.colSponsorIntent} TEXT,
+      ${DbConstants.colProgramName}   TEXT,
       ${DbConstants.colTargetDate}    INTEGER,
       ${DbConstants.colVolunteerId}   TEXT,
       ${DbConstants.colWorkerId}      TEXT,
@@ -384,8 +394,7 @@ class AppDatabase {
 
   /// Removes legacy SQLite demo plots and rows that reference them.
   Future<void> _purgeDemoSeedPlots(Database db) async {
-    final placeholders =
-        List.filled(_demoSeedPlotIds.length, '?').join(',');
+    final placeholders = List.filled(_demoSeedPlotIds.length, '?').join(',');
     final args = _demoSeedPlotIds;
 
     await db.delete(
@@ -398,16 +407,13 @@ class AppDatabase {
       where: '${DbConstants.colPlotId} IN ($placeholders)',
       whereArgs: args,
     );
-    await db.rawDelete(
-      '''
+    await db.rawDelete('''
       DELETE FROM ${DbConstants.tableTreeGrowthUpdates}
        WHERE ${DbConstants.colTreeId} IN (
          SELECT ${DbConstants.colId} FROM ${DbConstants.tableTrees}
           WHERE ${DbConstants.colPlotId} IN ($placeholders)
        )
-      ''',
-      args,
-    );
+      ''', args);
     await db.delete(
       DbConstants.tableTrees,
       where: '${DbConstants.colPlotId} IN ($placeholders)',
@@ -509,16 +515,12 @@ class AppDatabase {
       ('WORKER-003', 'PLT-088'),
     ];
     for (final (workerId, plotId) in assignments) {
-      batch.insert(
-        DbConstants.tableWorkerPlotAssignments,
-        {
-          DbConstants.colId: '$workerId-$plotId',
-          DbConstants.colWorkerId: workerId,
-          DbConstants.colPlotId: plotId,
-          DbConstants.colAssignedAt: now,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      batch.insert(DbConstants.tableWorkerPlotAssignments, {
+        DbConstants.colId: '$workerId-$plotId',
+        DbConstants.colWorkerId: workerId,
+        DbConstants.colPlotId: plotId,
+        DbConstants.colAssignedAt: now,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
     await batch.commit(noResult: true);
   }
@@ -620,16 +622,11 @@ class AppDatabase {
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
 
   Future<String> _writeSamplePhoto(String fileName, String base64Png) async {
-    final root = await getDatabasesPath();
-    final folder = Directory(p.join(root, 'sample_photos'));
-    if (!await folder.exists()) {
-      await folder.create(recursive: true);
+    if (kIsWeb) {
+      return 'data:image/png;base64,$base64Png';
     }
-    final file = File(p.join(folder.path, fileName));
-    if (!await file.exists()) {
-      await file.writeAsBytes(base64Decode(base64Png), flush: true);
-    }
-    return file.path;
+
+    return writeSamplePhotoFile(fileName, base64Decode(base64Png));
   }
 
   /// Seeds growth-stage updates (with photos) so admin volunteers can review
@@ -658,24 +655,20 @@ class AppDatabase {
     }) {
       final recordedAt = now.subtract(Duration(days: daysAgo, hours: daysAgo));
       final ms = recordedAt.millisecondsSinceEpoch;
-      batch.insert(
-        DbConstants.tableTreeGrowthUpdates,
-        {
-          DbConstants.colId: id,
-          DbConstants.colTreeId: treeId,
-          DbConstants.colGrowthStage: stage,
-          DbConstants.colHeightCm: heightCm,
-          DbConstants.colNotes: notes,
-          DbConstants.colPhotoPath: photoPath,
-          DbConstants.colRecordedBy: workerId,
-          DbConstants.colRecordedAt: ms,
-          DbConstants.colSyncStatus: 'synced',
-          DbConstants.colRetryCount: 0,
-          DbConstants.colCreatedAt: ms,
-          DbConstants.colUpdatedAt: ms,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      batch.insert(DbConstants.tableTreeGrowthUpdates, {
+        DbConstants.colId: id,
+        DbConstants.colTreeId: treeId,
+        DbConstants.colGrowthStage: stage,
+        DbConstants.colHeightCm: heightCm,
+        DbConstants.colNotes: notes,
+        DbConstants.colPhotoPath: photoPath,
+        DbConstants.colRecordedBy: workerId,
+        DbConstants.colRecordedAt: ms,
+        DbConstants.colSyncStatus: 'synced',
+        DbConstants.colRetryCount: 0,
+        DbConstants.colCreatedAt: ms,
+        DbConstants.colUpdatedAt: ms,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
 
     // Rajan — Teak trees

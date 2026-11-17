@@ -5,7 +5,7 @@ class DbConstants {
   DbConstants._();
 
   // ── DB meta ──────────────────────────────────────────────────────────────
-  static const int version = 10;
+  static const int version = 11;
   static const String dbName = 'omy_earth.db';
 
   // ── Table names ──────────────────────────────────────────────────────────
@@ -99,6 +99,7 @@ class DbConstants {
   static const String colRegionName = 'region_name';
   static const String colSponsorshipId = 'sponsorship_id';
   static const String colSponsorIntent = 'sponsor_intent';
+  static const String colProgramName = 'program_name';
 
   // ── sync_meta keys ────────────────────────────────────────────────────────
   static const String metaKeyLastSyncTime = 'last_sync_time';

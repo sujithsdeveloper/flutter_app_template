@@ -25,11 +25,11 @@ enum TaskStatus {
   }
 
   String get value => switch (this) {
-        pending => 'pending',
-        assigned => 'assigned',
-        planted => 'planted',
-        cancelled => 'cancelled',
-      };
+    pending => 'pending',
+    assigned => 'assigned',
+    planted => 'planted',
+    cancelled => 'cancelled',
+  };
 
   bool get isActionable => this == pending || this == assigned;
 }
@@ -52,6 +52,7 @@ class TreeTaskModel {
     this.notes,
     this.adminNotes,
     this.sponsorIntent,
+    this.programName,
     this.targetDate,
     this.volunteerId,
     this.workerId,
@@ -90,6 +91,9 @@ class TreeTaskModel {
   /// Clear sponsor intent line, e.g. "A sponsor wants to plant this Teak in Wayanad".
   final String? sponsorIntent;
 
+  /// Safe operational label for a corporate program. Never contains pricing.
+  final String? programName;
+
   final DateTime? targetDate;
   final String? volunteerId;
 
@@ -126,8 +130,16 @@ class TreeTaskModel {
       (treeId != null && treeId!.isNotEmpty);
 
   /// Display line for sponsor intent (API field, notes fallback, or generated).
-  String displaySponsorIntent(String Function(String species, String region) fallback) {
+  String displaySponsorIntent(
+    String Function(String species, String region) fallback,
+  ) {
+    final program = programName?.trim();
     final intent = sponsorIntent?.trim();
+    if (program != null && program.isNotEmpty) {
+      return intent != null && intent.isNotEmpty
+          ? '$program — $intent'
+          : program;
+    }
     if (intent != null && intent.isNotEmpty) return intent;
     final notesLine = adminNotes?.trim();
     if (notesLine != null && notesLine.isNotEmpty) return notesLine;
@@ -178,6 +190,7 @@ class TreeTaskModel {
       notes: map[DbConstants.colNotes] as String?,
       adminNotes: map[DbConstants.colAdminNotes] as String?,
       sponsorIntent: map[DbConstants.colSponsorIntent] as String?,
+      programName: map[DbConstants.colProgramName] as String?,
       targetDate: map[DbConstants.colTargetDate] != null
           ? DateTime.fromMillisecondsSinceEpoch(
               map[DbConstants.colTargetDate] as int,
@@ -225,6 +238,7 @@ class TreeTaskModel {
       DbConstants.colNotes: notes,
       DbConstants.colAdminNotes: adminNotes,
       DbConstants.colSponsorIntent: sponsorIntent,
+      DbConstants.colProgramName: programName,
       DbConstants.colTargetDate: targetDate?.millisecondsSinceEpoch,
       DbConstants.colVolunteerId: volunteerId,
       DbConstants.colWorkerId: workerId,
@@ -255,6 +269,7 @@ class TreeTaskModel {
     String? regionName,
     String? plotName,
     String? sponsorIntent,
+    String? programName,
     TaskStatus? taskStatus,
     SyncStatus? syncStatus,
     int? retryCount,
@@ -272,6 +287,7 @@ class TreeTaskModel {
       notes: notes ?? this.notes,
       adminNotes: adminNotes,
       sponsorIntent: sponsorIntent ?? this.sponsorIntent,
+      programName: programName ?? this.programName,
       targetDate: targetDate,
       volunteerId: volunteerId ?? this.volunteerId,
       workerId: workerId ?? this.workerId,

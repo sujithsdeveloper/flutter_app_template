@@ -169,8 +169,10 @@ class AppText {
     'Ask your volunteer (admin) for the access code',
     'ആക്‌സസ് കോഡിനായി നിങ്ങളുടെ വോളണ്ടിയർ (അഡ്മിൻ)യോട് ചോദിക്കുക',
   );
-  String get demoWorkerHint =>
-      _t('Demo: 97461 23456 / OMY-2026', 'ഡെമോ: 97461 23456 / OMY-2026');
+  String get demoWorkerHint => _t(
+    'Use the phone number and access code provided by your volunteer admin',
+    'നിങ്ങളുടെ വോളണ്ടിയർ അഡ്മിൻ നൽകിയ ഫോൺ നമ്പറും ആക്‌സസ് കോഡും ഉപയോഗിക്കുക',
+  );
 
   // Auth — common
   String get logout => _t('Logout', 'ലോഗൗട്ട്');
