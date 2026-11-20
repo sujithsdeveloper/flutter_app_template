@@ -1,5 +1,6 @@
 import 'package:mess_app/core/database/app_database.dart';
 import 'package:mess_app/core/database/db_constants.dart';
+import 'package:mess_app/data/models/sync_status.dart';
 import 'package:mess_app/data/models/tree_task_model.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -173,6 +174,9 @@ class TreeTaskRepository {
     String taskId, {
     String? notes,
     String? photoPath,
+    double? latitude,
+    double? longitude,
+    SyncStatus syncStatus = SyncStatus.pending,
   }) async {
     final db = await _database;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -180,7 +184,9 @@ class TreeTaskRepository {
       DbConstants.tableTreeTasks,
       {
         DbConstants.colTaskStatus: TaskStatus.planted.value,
-        DbConstants.colSyncStatus: 'pending',
+        DbConstants.colSyncStatus: syncStatus.value,
+        if (latitude != null) DbConstants.colLatitude: latitude,
+        if (longitude != null) DbConstants.colLongitude: longitude,
         DbConstants.colUpdatedAt: now,
         if (notes != null) DbConstants.colNotes: notes,
         if (photoPath != null) DbConstants.colPhotoPath: photoPath,
@@ -191,14 +197,18 @@ class TreeTaskRepository {
   }
 
   /// Marks a task as cancelled with an optional [reason] stored in last_error.
-  Future<void> cancelTask(String taskId, {String? reason}) async {
+  Future<void> cancelTask(
+    String taskId, {
+    String? reason,
+    SyncStatus syncStatus = SyncStatus.pending,
+  }) async {
     final db = await _database;
     final now = DateTime.now().millisecondsSinceEpoch;
     await db.update(
       DbConstants.tableTreeTasks,
       {
         DbConstants.colTaskStatus: TaskStatus.cancelled.value,
-        DbConstants.colSyncStatus: 'pending',
+        DbConstants.colSyncStatus: syncStatus.value,
         DbConstants.colUpdatedAt: now,
         if (reason != null) DbConstants.colLastError: reason,
       },

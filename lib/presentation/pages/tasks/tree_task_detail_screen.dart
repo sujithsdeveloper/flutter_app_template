@@ -1,19 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:mess_app/core/auth/session_manager.dart';
+import 'package:mess_app/core/auth/user_session.dart';
 import 'package:mess_app/core/localization/app_language.dart';
+import 'package:mess_app/core/network/field_api_service.dart';
+import 'package:mess_app/core/service_locator/di.dart';
 import 'package:mess_app/core/utils/constants/color_constants.dart';
 import 'package:mess_app/data/models/tree_task_model.dart';
+import 'package:mess_app/data/models/tree_model.dart';
 import 'package:mess_app/data/models/worker_model.dart';
+import 'package:mess_app/data/repositories/tree_repository.dart';
+import 'package:mess_app/data/repositories/tree_task_repository.dart';
+import 'package:mess_app/presentation/blocs/dashboard/dashboard_cubit.dart';
 import 'package:mess_app/presentation/blocs/tree_tasks/tree_tasks_cubit.dart';
 import 'package:mess_app/presentation/blocs/workers/workers_cubit.dart';
 import 'package:mess_app/presentation/blocs/workers/workers_state.dart';
+import 'package:mess_app/presentation/pages/worker/task_update_screen.dart';
+import 'package:mess_app/presentation/pages/worker/worker_tree_detail_screen.dart';
 import 'package:mess_app/presentation/widgets/primary_button.dart';
 import 'package:mess_app/presentation/widgets/snackbar_helper.dart';
 
 /// Full detail view for an admin-assigned planting task.
 /// Displays the target location, species, plot, admin notes, and lets the
-/// Volunteer assign or reassign a worker via a bottom sheet.
+/// field admin assign a field volunteer or plant the tree themselves.
 class TreeTaskDetailScreen extends StatefulWidget {
   const TreeTaskDetailScreen({super.key, required this.task, required this.t});
 
@@ -26,11 +36,91 @@ class TreeTaskDetailScreen extends StatefulWidget {
 
 class _TreeTaskDetailScreenState extends State<TreeTaskDetailScreen> {
   late TreeTaskModel _task;
+  UserSession? _session;
+  bool _claiming = false;
 
   @override
   void initState() {
     super.initState();
     _task = widget.task;
+    _loadSession();
+  }
+
+  Future<void> _loadSession() async {
+    final session = await getIt<SessionManager>().getSession();
+    if (mounted && session?.role.isAdminVolunteer == true) {
+      setState(() => _session = session);
+    }
+  }
+
+  Future<void> _openPlantingForm(UserSession session) async {
+    final tasksCubit = context.read<TreeTasksCubit>();
+    final dashboardCubit = context.read<DashboardCubit>();
+    setState(() => _claiming = true);
+    try {
+      final claimed = await tasksCubit.claimForSelf(_task.id);
+      if (!mounted) return;
+      setState(() => _task = claimed);
+      if (!claimed.isSelfAssignedTo(session.userId) ||
+          claimed.taskStatus != TaskStatus.assigned) {
+        return;
+      }
+      final saved = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TaskUpdateScreen(task: claimed, session: session),
+        ),
+      );
+      if (!mounted) return;
+      if (saved == true) {
+        final updated = await getIt<TreeTaskRepository>().getById(claimed.id);
+        if (mounted && updated != null) setState(() => _task = updated);
+        await tasksCubit.load();
+      }
+      await dashboardCubit.refresh();
+    } catch (e) {
+      if (mounted) {
+        SnackbarHelper.showError(
+          context: context,
+          message: FieldApiService.messageOf(e),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _claiming = false);
+    }
+  }
+
+  Future<void> _openPlantedTree(UserSession session) async {
+    final task = _task;
+    final treeId = task.treeId ?? task.id;
+    final cached = await getIt<TreeRepository>().getById(treeId);
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WorkerTreeDetailScreen(
+          tree:
+              cached ??
+              TreeModel(
+                id: treeId,
+                species: task.species,
+                plotId: task.plotId,
+                plotName: task.plotName,
+                regionName: task.regionName,
+                plantedBy: session.userName,
+                plantedById: session.userId,
+                plantingDate: task.updatedAt,
+                latitude: task.latitude,
+                longitude: task.longitude,
+                notes: task.notes,
+                createdAt: task.createdAt,
+                updatedAt: task.updatedAt,
+              ),
+          workerId: session.userId,
+          syncGrowth: task.treeId != null,
+        ),
+      ),
+    );
   }
 
   Future<void> _copyLocation() async {
@@ -79,6 +169,13 @@ class _TreeTaskDetailScreenState extends State<TreeTaskDetailScreen> {
   Widget build(BuildContext context) {
     final t = widget.t;
     final task = _task;
+    final session = _session;
+    final isMine = session != null && task.isSelfAssignedTo(session.userId);
+    final canPlant =
+        session != null &&
+        task.taskStatus.isActionable &&
+        (task.workerId == null || task.workerId!.isEmpty) &&
+        (task.volunteerId == null || task.volunteerId == session.userId);
 
     return Scaffold(
       backgroundColor: ColorConstants.lightBackgroundSecondary,
@@ -260,19 +357,34 @@ class _TreeTaskDetailScreenState extends State<TreeTaskDetailScreen> {
           ],
 
           // ── Assignment ──────────────────────────────────────────────
-          _AssignmentCard(task: task, t: t, onAssign: _showAssignSheet),
-          const SizedBox(height: 32),
-
-          // ── CTA: assign (or reassign) a field worker — volunteers do not
-          // claim tasks for themselves; assign auto-links volunteer_id.
-          if (task.taskStatus == TaskStatus.pending ||
-              task.taskStatus == TaskStatus.assigned)
+          _AssignmentCard(
+            task: task,
+            t: t,
+            isMine: isMine,
+          ),
+          const SizedBox(height: 24),
+          if (canPlant) ...[
             PrimaryButton(
-              label: task.workerId == null || task.workerId!.isEmpty
-                  ? t.assignWorker
-                  : t.reassign,
-              icon: Icons.person_add_rounded,
-              onPressed: _showAssignSheet,
+              label: isMine ? t.updateTask : t.plantMyself,
+              icon: Icons.park_rounded,
+              isLoading: _claiming,
+              onPressed: () => _openPlantingForm(session),
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (task.taskStatus.isActionable)
+            OutlinedButton.icon(
+              label: Text(task.workerId == null ? t.assignWorker : t.reassign),
+              icon: const Icon(Icons.person_add_rounded),
+              onPressed: _claiming ? null : _showAssignSheet,
+            )
+          else if (session != null &&
+              isMine &&
+              task.taskStatus == TaskStatus.planted)
+            PrimaryButton(
+              label: t.treeDetails,
+              icon: Icons.park_rounded,
+              onPressed: () => _openPlantedTree(session),
             ),
         ],
       ),
@@ -393,13 +505,15 @@ class _SectionCard extends StatelessWidget {
             children: [
               Icon(icon, size: 16, color: iconColor),
               const SizedBox(width: 6),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: ColorConstants.lightTextSecondary,
-                  letterSpacing: 0.3,
+              Flexible(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: ColorConstants.lightTextSecondary,
+                    letterSpacing: 0.3,
+                  ),
                 ),
               ),
             ],
@@ -473,12 +587,12 @@ class _AssignmentCard extends StatelessWidget {
   const _AssignmentCard({
     required this.task,
     required this.t,
-    required this.onAssign,
+    required this.isMine,
   });
 
   final TreeTaskModel task;
   final AppText t;
-  final VoidCallback onAssign;
+  final bool isMine;
 
   @override
   Widget build(BuildContext context) {
@@ -486,7 +600,9 @@ class _AssignmentCard extends StatelessWidget {
       icon: Icons.people_rounded,
       iconColor: ColorConstants.infoColor,
       title: t.assignedTo,
-      child: task.workerId == null
+      child: isMine
+          ? Text(t.assignedToMe)
+          : task.workerId == null
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -498,24 +614,27 @@ class _AssignmentCard extends StatelessWidget {
                       color: ColorConstants.lightTextSecondary,
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      t.unassigned,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: ColorConstants.lightTextSecondary,
+                    Flexible(
+                      child: Text(
+                        t.unassigned,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: ColorConstants.lightTextSecondary,
+                        ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  t.assignWorkerHint,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    height: 1.35,
-                    color: ColorConstants.lightTextSecondary,
+                if (task.taskStatus.isActionable) const SizedBox(height: 8),
+                if (task.taskStatus.isActionable)
+                  Text(
+                    t.assignWorkerHint,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      height: 1.35,
+                      color: ColorConstants.lightTextSecondary,
+                    ),
                   ),
-                ),
               ],
             )
           : Row(
@@ -547,17 +666,6 @@ class _AssignmentCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (task.taskStatus == TaskStatus.assigned)
-                  TextButton(
-                    onPressed: onAssign,
-                    child: Text(
-                      t.reassign,
-                      style: const TextStyle(
-                        color: ColorConstants.forestGreen,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
               ],
             ),
     );
@@ -696,13 +804,21 @@ class _AssignWorkerSheet extends StatelessWidget {
                       t: t,
                       onTap: () async {
                         final tasksCubit = context.read<TreeTasksCubit>();
-                        final updated = await tasksCubit.assignWorker(
-                          task.id,
-                          workers[i].worker.id,
-                          workerName: workers[i].worker.name,
-                        );
-                        if (updated != null) {
-                          onAssigned(updated);
+                        try {
+                          final updated = await tasksCubit.assignWorker(
+                            task.id,
+                            workers[i].worker.id,
+                            workerName: workers[i].worker.name,
+                          );
+                          if (context.mounted && updated != null) {
+                            onAssigned(updated);
+                          }
+                        } catch (e) {
+                          if (!context.mounted) return;
+                          SnackbarHelper.showError(
+                            context: context,
+                            message: FieldApiService.messageOf(e),
+                          );
                         }
                       },
                     ),

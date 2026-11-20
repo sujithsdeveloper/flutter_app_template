@@ -21,7 +21,7 @@ Future<void> main() async {
     // Fall back to resolveApiBaseUrl() default when .env is missing.
   }
 
-  // Select the browser-backed SQLite implementation before opening the DB.
+  // Configure SQLite for the current platform before opening the DB.
   await configureDatabasePlatform();
 
   // DB must be open before DI setup so repositories can be registered.

@@ -205,7 +205,14 @@ class AppText {
   String get gpsRequired =>
       _t('Please capture GPS location first', 'ആദ്യം GPS ക്യാപ്ചർ ചെയ്യുക');
   String get takePhoto => _t('Take Photo', 'ഫോട്ടോ എടുക്കുക');
-  String get fromGallery => _t('From Gallery', 'ഗ്യാലറിയിൽ നിന്ന്');
+  String get treeCameraUnavailable => _t(
+    'Take tree photos in the Android or iOS app.',
+    'മരങ്ങളുടെ ഫോട്ടോ Android അല്ലെങ്കിൽ iOS ആപ്പിൽ എടുക്കുക.',
+  );
+  String get treeCameraFailed => _t(
+    'Could not open the camera. Check camera permissions and try again.',
+    'ക്യാമറ തുറക്കാനായില്ല. ക്യാമറ അനുമതി പരിശോധിച്ച് വീണ്ടും ശ്രമിക്കുക.',
+  );
   String get photoOptional => _t('Photo (optional)', 'ഫോട്ടോ (ഐച്ഛിക)');
   String get workerNotesLabel => _t('Notes', 'കുറിപ്പ്');
   String get workerNotesHint =>
@@ -323,10 +330,13 @@ class AppText {
   String get pendingTasks => _t('Pending tasks', 'ബാക്കി ടാസ്‌കുകൾ');
   String get allTasks => _t('All', 'എല്ലാം');
   String get unassigned => _t('Unassigned', 'ഏൽപ്പിക്കാത്തത്');
+  String get plantMyself => _t('Plant myself', 'ഞാൻ തന്നെ നടാം');
+  String get assignedToMe => _t('Assigned to me', 'എനിക്ക് ഏൽപ്പിച്ചത്');
+  String get taskDetails => _t('View task', 'ടാസ്‌ക് കാണുക');
   String get assigned => _t('Assigned', 'ഏൽപ്പിച്ചത്');
   String get planted => _t('Planted', 'നട്ടത്');
-  String get assignWorker => _t('Assign to worker', 'വർക്കറെ ഏൽപ്പിക്കുക');
-  String get reassign => _t('Reassign worker', 'വർക്കറെ മാറ്റുക');
+  String get assignWorker => _t('Assign to volunteer', 'വോളണ്ടിയറെ ഏൽപ്പിക്കുക');
+  String get reassign => _t('Reassign volunteer', 'വോളണ്ടിയറെ മാറ്റുക');
   String get assignedTo => _t('Assigned to', 'ഏൽപ്പിച്ചത്');
   String get noTasksYet => _t('No planting tasks yet', 'നടീൽ ടാസ്‌കുകൾ ഒന്നുമില്ല');
   String get noTasksHint => _t(
@@ -335,8 +345,8 @@ class AppText {
   );
   String get needsPlanting => _t('Needs planting', 'നടീൽ ആവശ്യമാണ്');
   String get assignWorkerHint => _t(
-    'Assign a field worker to plant this sponsored tree',
-    'ഈ സ്പോൺസർ മരം നടാൻ ഒരു ഫീൽഡ് വർക്കറെ ഏൽപ്പിക്കുക',
+    'Plant this tree yourself or assign it to a field volunteer.',
+    'ഈ മരം സ്വയം നടുകയോ ഒരു ഫീൽഡ് വോളണ്ടിയറെ ഏൽപ്പിക്കുകയോ ചെയ്യാം.',
   );
   String get sponsorWantsPlanting => _t(
         'A sponsor wants this tree planted',
@@ -403,6 +413,14 @@ class AppText {
   String get searchPlots => _t('Search plots', 'പ്ലോട്ടുകൾ തിരയുക');
   String get allPlots => _t('All plots', 'എല്ലാ പ്ലോട്ടുകളും');
   String get plotDetails => _t('Plot details', 'പ്ലോട്ട് വിവരങ്ങൾ');
+  String get plantedTrees => _t('Planted trees', 'നട്ട മരങ്ങൾ');
+  String get noPlantedTreesOnPlot =>
+      _t('No planted trees on this plot yet.', 'ഈ പ്ലോട്ടിൽ ഇതുവരെ മരങ്ങൾ നട്ടിട്ടില്ല.');
+  String get plantedBy => _t('Planted by', 'നട്ടത്');
+  String get unknownPlanter => _t('Planter not recorded', 'നട്ട വ്യക്തിയുടെ വിവരം ലഭ്യമല്ല');
+  String get regionUnassigned => _t('Region unassigned', 'മേഖല നൽകിയിട്ടില്ല');
+  String get couldNotLoadPlantedTrees =>
+      _t('Could not load planted trees.', 'നട്ട മരങ്ങളുടെ വിവരങ്ങൾ ലഭ്യമല്ല.');
   String get plotViewOnlyHint => _t(
         'Plot changes are managed from the web admin panel.',
         'പ്ലോട്ട് മാറ്റങ്ങൾ വെബ് അഡ്മിൻ പാനലിൽ നിന്ന് നിയന്ത്രിക്കുന്നു.',

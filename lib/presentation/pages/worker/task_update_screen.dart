@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:mess_app/core/auth/user_session.dart';
 import 'package:mess_app/core/constants/app_logger.dart';
 import 'package:mess_app/core/localization/app_language.dart';
@@ -13,15 +13,17 @@ import 'package:mess_app/data/models/sync_status.dart';
 import 'package:mess_app/data/models/tree_model.dart';
 import 'package:mess_app/data/models/tree_task_model.dart';
 import 'package:mess_app/data/models/tree_growth_update_model.dart';
+import 'package:mess_app/data/repositories/plot_repository.dart';
 import 'package:mess_app/data/repositories/tree_growth_repository.dart';
 import 'package:mess_app/data/repositories/tree_repository.dart';
 import 'package:mess_app/data/repositories/tree_task_repository.dart';
 import 'package:mess_app/presentation/widgets/custom_textfield.dart';
 import 'package:mess_app/presentation/widgets/primary_button.dart';
 import 'package:mess_app/presentation/widgets/snackbar_helper.dart';
+import 'package:mess_app/presentation/widgets/tree_photo_capture.dart';
 import 'package:uuid/uuid.dart';
 
-/// Allows a worker (planter) to update a task they have been assigned:
+/// Allows the assigned planter to update a task:
 /// - Capture current GPS
 /// - Take a photo of the plant / site
 /// - Add notes
@@ -53,6 +55,8 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
   bool _loadingGps = false;
   bool _saving = false;
 
+  bool get _isFieldAdmin => widget.session.role.isAdminVolunteer;
+
   @override
   void dispose() {
     _notesCtrl.dispose();
@@ -77,8 +81,9 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
         return;
       }
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
       if (!mounted) return;
       setState(() => _position = pos);
@@ -95,61 +100,9 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
 
   // ── Photo ─────────────────────────────────────────────────────────────────
 
-  Future<void> _pickImage(ImageSource source) async {
-    final picker = ImagePicker();
-    final image = await picker.pickImage(
-      source: source,
-      imageQuality: 72,
-      maxWidth: 1280,
-    );
-    if (image != null && mounted) {
-      setState(() => _photoPath = image.path);
-    }
-  }
-
-  void _showPhotoSheet(AppText t) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: ColorConstants.borderGrey,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 16),
-              _SheetOption(
-                icon: Icons.camera_alt_rounded,
-                label: t.takePhoto,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _pickImage(ImageSource.camera);
-                },
-              ),
-              const SizedBox(height: 8),
-              _SheetOption(
-                icon: Icons.photo_library_rounded,
-                label: t.fromGallery,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _pickImage(ImageSource.gallery);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  Future<void> _takePhoto(AppText t) async {
+    final path = await captureTreePhoto(context, t);
+    if (mounted && path != null) setState(() => _photoPath = path);
   }
 
   // ── Save actions ──────────────────────────────────────────────────────────
@@ -163,72 +116,110 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
     try {
       final now = DateTime.now();
       // Prefer the sponsored backend tree id so donor My Trees updates in place.
-      final treeId = (widget.task.treeId != null && widget.task.treeId!.isNotEmpty)
-          ? widget.task.treeId!
-          : const Uuid().v4();
-      final notes = _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim();
+      final linkedTreeId = widget.task.treeId;
+      final treeId = linkedTreeId ?? widget.task.id;
+      final plot = await getIt<PlotRepository>().getById(widget.task.plotId);
+      var syncStatus = SyncStatus.pending;
+      var growthId = _isFieldAdmin ? widget.task.id : const Uuid().v4();
+      var growthStatus = SyncStatus.pending;
+      final notes = _notesCtrl.text.trim().isEmpty
+          ? null
+          : _notesCtrl.text.trim();
 
-      // Push completion to the API first when online so website/admin match.
+      // Upload the captured photo using the same private storage as growth evidence.
+      String? photoUrl;
       try {
+        if (linkedTreeId != null && _photoPath != null) {
+          photoUrl = await _fieldApi.uploadGrowthPhoto(
+            await XFile(_photoPath!).readAsBytes(),
+          );
+        }
         await _fieldApi.updateTreeTask(
           widget.task.id,
           taskStatus: 'planted',
           notes: notes,
+          photoUrl: photoUrl,
           lat: _position!.latitude,
           lng: _position!.longitude,
         );
-        if (widget.task.treeId != null && widget.task.treeId!.isNotEmpty) {
-          await _fieldApi.createGrowthUpdate(
-            treeId: widget.task.treeId!,
-            stage: GrowthStage.planted.value,
-            notes: notes,
-            recordedBy: widget.session.userId,
-          );
-        }
+        syncStatus = SyncStatus.synced;
       } catch (e) {
+        if (_isFieldAdmin || !FieldApiService.isOfflineError(e)) rethrow;
         AppLogger.error('[TaskUpdateScreen] remote plant deferred: $e');
       }
 
+      if (linkedTreeId != null && syncStatus == SyncStatus.synced) {
+        if (_isFieldAdmin) {
+          growthStatus = SyncStatus.synced;
+        } else {
+          try {
+            final growth = await _fieldApi.createGrowthUpdate(
+              treeId: linkedTreeId,
+              stage: GrowthStage.planted.value,
+              notes: notes,
+              photoUrl: photoUrl,
+              recordedBy: widget.session.userId,
+            );
+            growthId = growth['id'] as String? ?? growthId;
+            growthStatus = SyncStatus.synced;
+          } catch (e) {
+            AppLogger.error('[TaskUpdateScreen] planting history deferred: $e');
+          }
+        }
+      }
+
       // 1. Local planted tree record (offline cache / worker My Trees).
-      await _treeRepo.insert(
-        TreeModel(
-          id: treeId,
-          plotId: widget.task.plotId,
-          species: widget.task.species,
-          plantingDate: now,
-          latitude: _position!.latitude,
-          longitude: _position!.longitude,
-          gpsAccuracy: _position!.accuracy,
-          notes: notes,
-          workerId: widget.session.userId,
-          syncStatus: SyncStatus.pending,
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      if (await _treeRepo.getById(treeId) == null) {
+        await _treeRepo.insert(
+          TreeModel(
+            id: treeId,
+            serverId: syncStatus == SyncStatus.synced ? linkedTreeId : null,
+            plotId: widget.task.plotId,
+            plotName: plot?.name ?? widget.task.plotName,
+            regionName: plot?.regionName ?? widget.task.regionName,
+            plantedBy: widget.session.userName,
+            plantedById: widget.session.userId,
+            species: widget.task.species,
+            plantingDate: now,
+            latitude: _position!.latitude,
+            longitude: _position!.longitude,
+            gpsAccuracy: _position!.accuracy,
+            notes: notes,
+            workerId: _isFieldAdmin ? null : widget.session.userId,
+            syncStatus: linkedTreeId != null ? syncStatus : SyncStatus.pending,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+      }
 
       // 2. Mark the task as planted with photo + notes.
       await _taskRepo.markAsPlanted(
         widget.task.id,
         notes: notes,
         photoPath: _photoPath,
+        latitude: _position!.latitude,
+        longitude: _position!.longitude,
+        syncStatus: syncStatus,
       );
 
       // 3. Seed the initial "Planted" growth-stage entry locally.
-      await _growthRepo.insert(
-        TreeGrowthUpdateModel(
-          id: const Uuid().v4(),
-          treeId: treeId,
-          stage: GrowthStage.planted,
-          notes: notes,
-          photoPath: _photoPath,
-          recordedBy: widget.session.userId,
-          recordedAt: now,
-          syncStatus: SyncStatus.pending,
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      if (!_isFieldAdmin || await _growthRepo.getLatest(treeId) == null) {
+        await _growthRepo.insert(
+          TreeGrowthUpdateModel(
+            id: growthId,
+            treeId: treeId,
+            stage: GrowthStage.planted,
+            notes: notes,
+            photoPath: _photoPath,
+            recordedBy: widget.session.userId,
+            recordedAt: now,
+            syncStatus: growthStatus,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+      }
 
       if (!mounted) return;
       SnackbarHelper.showSucces(context: context, message: t.taskUpdated);
@@ -237,7 +228,7 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
       if (!mounted) return;
       SnackbarHelper.showError(
         context: context,
-        message: 'Failed to save: $e',
+        message: FieldApiService.messageOf(e),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -249,9 +240,7 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
     final reason = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(
           t.cantPlant,
           style: const TextStyle(fontWeight: FontWeight.w700),
@@ -260,9 +249,7 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
           controller: reasonCtrl,
           decoration: InputDecoration(
             hintText: t.cantPlantReasonHint,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           ),
           maxLines: 3,
           autofocus: true,
@@ -270,9 +257,10 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text(t.cancel,
-                style: const TextStyle(
-                    color: ColorConstants.lightTextSecondary)),
+            child: Text(
+              t.cancel,
+              style: const TextStyle(color: ColorConstants.lightTextSecondary),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -284,7 +272,8 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
               foregroundColor: Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             child: Text(t.cantPlant),
           ),
@@ -292,17 +281,31 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
       ),
     );
     reasonCtrl.dispose();
-    if (reason == null || reason.isEmpty) return;
+    if (!mounted || reason == null || reason.isEmpty) return;
 
     setState(() => _saving = true);
     try {
-      await _taskRepo.cancelTask(widget.task.id, reason: reason);
+      if (_isFieldAdmin) {
+        await _fieldApi.updateTreeTask(
+          widget.task.id,
+          taskStatus: 'cancelled',
+          notes: reason,
+        );
+      }
+      await _taskRepo.cancelTask(
+        widget.task.id,
+        reason: reason,
+        syncStatus: _isFieldAdmin ? SyncStatus.synced : SyncStatus.pending,
+      );
       if (!mounted) return;
       SnackbarHelper.showSucces(context: context, message: t.taskCancelled);
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
-      SnackbarHelper.showError(context: context, message: 'Failed to save: $e');
+      SnackbarHelper.showError(
+        context: context,
+        message: FieldApiService.messageOf(e),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -323,8 +326,10 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
             elevation: 0,
             surfaceTintColor: Colors.transparent,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded,
-                  color: ColorConstants.lightTextPrimary),
+              icon: const Icon(
+                Icons.arrow_back_rounded,
+                color: ColorConstants.lightTextPrimary,
+              ),
               onPressed: () => Navigator.pop(context),
             ),
             title: Text(
@@ -396,8 +401,11 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
                   color: ColorConstants.softGreen,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.park_rounded,
-                    size: 22, color: ColorConstants.forestGreen),
+                child: const Icon(
+                  Icons.park_rounded,
+                  size: 22,
+                  color: ColorConstants.forestGreen,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -524,20 +532,25 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                              ColorConstants.forestGreen)),
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          ColorConstants.forestGreen,
+                        ),
+                      ),
                     )
                   : const Icon(Icons.my_location_rounded, size: 18),
-              label: Text(_loadingGps
-                  ? t.gettingLocation
-                  : (_position != null ? t.retryGps : t.captureGps)),
+              label: Text(
+                _loadingGps
+                    ? t.gettingLocation
+                    : (_position != null ? t.retryGps : t.captureGps),
+              ),
               onPressed: _loadingGps ? null : () => _captureGps(t),
               style: OutlinedButton.styleFrom(
                 foregroundColor: ColorConstants.forestGreen,
                 side: const BorderSide(color: ColorConstants.forestGreen),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
@@ -559,8 +572,11 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.photo_camera_rounded,
-                  size: 20, color: ColorConstants.lightTextSecondary),
+              const Icon(
+                Icons.photo_camera_rounded,
+                size: 20,
+                color: ColorConstants.lightTextSecondary,
+              ),
               const SizedBox(width: 8),
               Text(
                 t.photoOptional,
@@ -590,29 +606,31 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.refresh_rounded, size: 16),
                     label: const Text('Retake'),
-                    onPressed: () => _showPhotoSheet(t),
+                    onPressed: () => _takePhoto(t),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: ColorConstants.lightTextSecondary,
                       side: const BorderSide(color: ColorConstants.borderGrey),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.delete_outline_rounded,
-                        size: 16),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 16),
                     label: const Text('Remove'),
                     onPressed: () => setState(() => _photoPath = null),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: ColorConstants.errorColor,
                       side: const BorderSide(
-                          color: ColorConstants.errorColor,
-                          width: 0.8),
+                        color: ColorConstants.errorColor,
+                        width: 0.8,
+                      ),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
                 ),
@@ -620,7 +638,7 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
             ),
           ] else ...[
             GestureDetector(
-              onTap: () => _showPhotoSheet(t),
+              onTap: () => _takePhoto(t),
               child: Container(
                 height: 120,
                 width: double.infinity,
@@ -672,8 +690,11 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.notes_rounded,
-                  size: 20, color: ColorConstants.lightTextSecondary),
+              const Icon(
+                Icons.notes_rounded,
+                size: 20,
+                color: ColorConstants.lightTextSecondary,
+              ),
               const SizedBox(width: 8),
               Text(
                 t.workerNotesLabel,
@@ -716,12 +737,15 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
                 side: const BorderSide(color: ColorConstants.errorColor),
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
               child: Text(
                 t.cantPlant,
                 style: const TextStyle(
-                    fontWeight: FontWeight.w700, fontSize: 15),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
               ),
             ),
           ),
@@ -747,7 +771,11 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
 // ── Helper widgets ────────────────────────────────────────────────────────────
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.icon, required this.label, required this.value});
+  const _InfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
   final IconData icon;
   final String label;
   final String value;
@@ -810,43 +838,6 @@ class _CoordRow extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _SheetOption extends StatelessWidget {
-  const _SheetOption(
-      {required this.icon, required this.label, required this.onTap});
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: ColorConstants.lightCard,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Icon(icon, size: 22, color: ColorConstants.forestGreen),
-              const SizedBox(width: 14),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: ColorConstants.lightTextPrimary,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

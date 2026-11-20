@@ -130,6 +130,29 @@ class AppDatabase {
               '${DbConstants.colProgramName} TEXT',
             );
           } catch (_) {}
+        case 12:
+          await db.execute(
+            'ALTER TABLE ${DbConstants.tablePlots} ADD COLUMN ${DbConstants.colRegionName} TEXT',
+          );
+          for (final column in [
+            DbConstants.colPlotName,
+            DbConstants.colRegionName,
+            DbConstants.colPlantedBy,
+            DbConstants.colPlantedById,
+          ]) {
+            await db.execute(
+              'ALTER TABLE ${DbConstants.tableTrees} ADD COLUMN $column TEXT',
+            );
+          }
+        case 13:
+          for (final column in [
+            DbConstants.colSponsorshipCategory,
+            DbConstants.colCorporateProgramId,
+          ]) {
+            await db.execute(
+              'ALTER TABLE ${DbConstants.tableTrees} ADD COLUMN $column TEXT',
+            );
+          }
         default:
           break;
       }
@@ -148,6 +171,7 @@ class AppDatabase {
         ${DbConstants.colServerId}            TEXT,
         ${DbConstants.colName}                TEXT NOT NULL,
         ${DbConstants.colLocation}            TEXT NOT NULL,
+        ${DbConstants.colRegionName}          TEXT,
         ${DbConstants.colDistrict}            TEXT,
         ${DbConstants.colLatitude}            REAL,
         ${DbConstants.colLongitude}           REAL,
@@ -179,6 +203,12 @@ class AppDatabase {
         ${DbConstants.colSpecies}         TEXT,
         ${DbConstants.colPlantingDate}    INTEGER,
         ${DbConstants.colPlotId}          TEXT NOT NULL,
+        ${DbConstants.colPlotName}        TEXT,
+        ${DbConstants.colSponsorshipCategory} TEXT,
+        ${DbConstants.colCorporateProgramId} TEXT,
+        ${DbConstants.colRegionName}      TEXT,
+        ${DbConstants.colPlantedBy}       TEXT,
+        ${DbConstants.colPlantedById}     TEXT,
         ${DbConstants.colBatch}           TEXT,
         ${DbConstants.colSaplingSource}   TEXT,
         ${DbConstants.colLatitude}        REAL NOT NULL,

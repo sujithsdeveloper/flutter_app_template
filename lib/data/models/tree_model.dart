@@ -7,9 +7,15 @@ class TreeModel {
   const TreeModel({
     required this.id,
     this.serverId,
+    this.sponsorshipCategory,
+    this.corporateProgramId,
     this.species,
     this.plantingDate,
     required this.plotId,
+    this.plotName,
+    this.regionName,
+    this.plantedBy,
+    this.plantedById,
     this.batch,
     this.saplingSource,
     required this.latitude,
@@ -29,9 +35,15 @@ class TreeModel {
 
   final String id;
   final String? serverId;
+  final String? sponsorshipCategory;
+  final String? corporateProgramId;
   final String? species;
   final DateTime? plantingDate;
   final String plotId;
+  final String? plotName;
+  final String? regionName;
+  final String? plantedBy;
+  final String? plantedById;
   final String? batch;
   final String? saplingSource;
   final double latitude;
@@ -48,12 +60,47 @@ class TreeModel {
   final DateTime updatedAt;
   final DateTime? syncedAt;
 
+  factory TreeModel.fromFieldApi(Map<String, dynamic> data) {
+    final now = DateTime.now();
+    DateTime? parseTime(dynamic value) =>
+        value is String ? DateTime.tryParse(value) : null;
+    String? optionalText(String key) {
+      final value = (data[key] as String?)?.trim();
+      return value == null || value.isEmpty ? null : value;
+    }
+
+    return TreeModel(
+      id: data['id'] as String,
+      serverId: optionalText('treeId'),
+      sponsorshipCategory: optionalText('category'),
+      corporateProgramId: optionalText('programId'),
+      plotId: data['plotId'] as String,
+      plotName: optionalText('plotName'),
+      regionName: optionalText('regionName'),
+      species: optionalText('species'),
+      plantedBy: optionalText('plantedBy'),
+      plantedById: optionalText('plantedById'),
+      workerId: optionalText('workerId'),
+      notes: optionalText('notes'),
+      isDead: data['isDead'] == true,
+      latitude: (data['lat'] as num).toDouble(),
+      longitude: (data['lng'] as num).toDouble(),
+      plantingDate: parseTime(data['plantingDate']),
+      syncStatus: SyncStatus.synced,
+      createdAt: parseTime(data['createdAt']) ?? now,
+      updatedAt: now,
+      syncedAt: now,
+    );
+  }
+
   // ── DB serialisation ─────────────────────────────────────────────────────
 
   factory TreeModel.fromMap(Map<String, dynamic> map) {
     return TreeModel(
       id: map[DbConstants.colId] as String,
       serverId: map[DbConstants.colServerId] as String?,
+      sponsorshipCategory: map[DbConstants.colSponsorshipCategory] as String?,
+      corporateProgramId: map[DbConstants.colCorporateProgramId] as String?,
       species: map[DbConstants.colSpecies] as String?,
       plantingDate: map[DbConstants.colPlantingDate] != null
           ? DateTime.fromMillisecondsSinceEpoch(
@@ -61,6 +108,10 @@ class TreeModel {
             )
           : null,
       plotId: map[DbConstants.colPlotId] as String,
+      plotName: map[DbConstants.colPlotName] as String?,
+      regionName: map[DbConstants.colRegionName] as String?,
+      plantedBy: map[DbConstants.colPlantedBy] as String?,
+      plantedById: map[DbConstants.colPlantedById] as String?,
       batch: map[DbConstants.colBatch] as String?,
       saplingSource: map[DbConstants.colSaplingSource] as String?,
       latitude: map[DbConstants.colLatitude] as double,
@@ -93,9 +144,15 @@ class TreeModel {
     return {
       DbConstants.colId: id,
       DbConstants.colServerId: serverId,
+      DbConstants.colSponsorshipCategory: sponsorshipCategory,
+      DbConstants.colCorporateProgramId: corporateProgramId,
       DbConstants.colSpecies: species,
       DbConstants.colPlantingDate: plantingDate?.millisecondsSinceEpoch,
       DbConstants.colPlotId: plotId,
+      DbConstants.colPlotName: plotName,
+      DbConstants.colRegionName: regionName,
+      DbConstants.colPlantedBy: plantedBy,
+      DbConstants.colPlantedById: plantedById,
       DbConstants.colBatch: batch,
       DbConstants.colSaplingSource: saplingSource,
       DbConstants.colLatitude: latitude,
@@ -125,11 +182,17 @@ class TreeModel {
     DateTime? syncedAt,
   }) {
     return TreeModel(
+      sponsorshipCategory: sponsorshipCategory,
+      corporateProgramId: corporateProgramId,
       id: id,
       serverId: serverId ?? this.serverId,
       species: species,
       plantingDate: plantingDate,
       plotId: plotId,
+      plotName: plotName,
+      regionName: regionName,
+      plantedBy: plantedBy,
+      plantedById: plantedById,
       batch: batch,
       saplingSource: saplingSource,
       latitude: latitude,

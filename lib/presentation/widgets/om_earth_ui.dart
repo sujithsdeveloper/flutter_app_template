@@ -277,6 +277,50 @@ class OmEarthStatusChip extends StatelessWidget {
 
 // ── Overview metric card ──────────────────────────────────────────────────────
 
+class OmEarthOverviewMetricGrid extends StatelessWidget {
+  const OmEarthOverviewMetricGrid({super.key, required this.children});
+
+  final List<OmEarthOverviewMetricCard> children;
+
+  @override
+  Widget build(BuildContext context) {
+    const gap = 12.0;
+    final minCardWidth = MediaQuery.textScalerOf(context).scale(14) * (132 / 14);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = switch (width) {
+          _ when width >= 4 * minCardWidth + 3 * gap => 4,
+          _ when width >= 2 * minCardWidth + gap => 2,
+          _ => 1,
+        };
+
+        return Column(
+          spacing: gap,
+          children: [
+            for (var start = 0; start < children.length; start += columns)
+              IntrinsicHeight(
+                child: Row(
+                  spacing: gap,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var offset = 0; offset < columns; offset++)
+                      Expanded(
+                        child: start + offset < children.length
+                            ? children[start + offset]
+                            : const SizedBox.shrink(),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class OmEarthOverviewMetricCard extends StatelessWidget {
   const OmEarthOverviewMetricCard({
     super.key,
@@ -286,12 +330,6 @@ class OmEarthOverviewMetricCard extends StatelessWidget {
     this.accentColor,
   });
 
-  /// Illustration footprint in the bottom-right corner.
-  static const double illustrationSize = 60;
-
-  /// Right inset so labels wrap clear of the illustration.
-  static const double textRightInset = 54;
-
   final String value;
   final String label;
   final String? illustrationAsset;
@@ -300,71 +338,56 @@ class OmEarthOverviewMetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tint = accentColor ?? ColorConstants.forestGreen;
-    final hasIllustration = illustrationAsset != null;
+    final asset = illustrationAsset;
 
     return OmEarthCard(
-      padding: EdgeInsets.zero,
+      padding: const EdgeInsets.all(12),
       radius: 20,
-      child: Stack(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Positioned.fill(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                10,
-                10,
-                hasIllustration ? textRightInset : 10,
-                hasIllustration ? illustrationSize * 0.35 : 10,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      value,
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                        color: ColorConstants.primaryText,
-                        height: 1,
-                        letterSpacing: -0.4,
-                      ),
+          Row(
+            children: [
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w800,
+                      color: ColorConstants.primaryText,
+                      height: 1.1,
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.topLeft,
-                      child: Text(
-                        label,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: tint.withValues(alpha: 0.8),
-                          height: 1.2,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
+              if (asset != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  width: 40,
+                  height: 40,
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: tint.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Image.asset(asset, fit: BoxFit.contain),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: ColorConstants.primaryText,
+              height: 1.25,
             ),
           ),
-          if (hasIllustration)
-            Positioned(
-              right: 4,
-              bottom: 4,
-              width: illustrationSize,
-              height: illustrationSize,
-              child: Image.asset(
-                illustrationAsset!,
-                fit: BoxFit.contain,
-                alignment: Alignment.bottomRight,
-              ),
-            ),
         ],
       ),
     );

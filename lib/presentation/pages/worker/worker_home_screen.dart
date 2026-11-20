@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../tasks/corporate_plantation_screen.dart';
 import 'package:intl/intl.dart';
 import 'package:mess_app/core/auth/user_session.dart';
 import 'package:mess_app/core/localization/app_language.dart';
@@ -10,6 +11,7 @@ import 'package:mess_app/data/models/tree_task_model.dart';
 import 'package:mess_app/data/repositories/tree_repository.dart';
 import 'package:mess_app/data/repositories/tree_task_repository.dart';
 import 'package:mess_app/data/repositories/worker_plot_repository.dart';
+import 'package:mess_app/presentation/pages/plots/plot_detail_screen.dart';
 import 'package:mess_app/presentation/pages/worker/task_update_screen.dart';
 import 'package:mess_app/presentation/widgets/om_earth_ui.dart';
 
@@ -66,9 +68,12 @@ class WorkerHomeScreenState extends State<WorkerHomeScreen> {
 
   Future<void> _load() async {
     final tasks = await _taskRepo.getByWorkerId(widget.session.userId);
-    final trees =
-        await _treeRepo.getRegisteredTodayByWorker(widget.session.userId);
-    final plots = await _plotAssignRepo.getPlotsForWorker(widget.session.userId);
+    final trees = await _treeRepo.getRegisteredTodayByWorker(
+      widget.session.userId,
+    );
+    final plots = await _plotAssignRepo.getPlotsForWorker(
+      widget.session.userId,
+    );
     if (!mounted) return;
     setState(() {
       _tasks = tasks;
@@ -79,8 +84,9 @@ class WorkerHomeScreenState extends State<WorkerHomeScreen> {
   }
 
   TreeTaskModel? _pickFeaturedTask() {
-    final actionable =
-        _tasks.where((task) => task.taskStatus.isActionable).toList();
+    final actionable = _tasks
+        .where((task) => task.taskStatus.isActionable)
+        .toList();
     if (actionable.isEmpty) return null;
 
     final now = DateTime.now();
@@ -175,6 +181,15 @@ class WorkerHomeScreenState extends State<WorkerHomeScreen> {
                           showLeafIcon: true,
                         ),
                         const SizedBox(height: 14),
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const CorporatePlantationScreen(),
+                            ),
+                          ),
+                          icon: const Icon(Icons.forest_outlined),
+                          label: const Text('Corporate planting batches'),
+                        ),
                         _TasksList(
                           t: t,
                           tasks: _tasks,
@@ -186,7 +201,17 @@ class WorkerHomeScreenState extends State<WorkerHomeScreen> {
                           showLeafIcon: true,
                         ),
                         const SizedBox(height: 14),
-                        _PlotsMiniList(t: t, plots: _plots),
+                        _PlotsMiniList(
+                          t: t,
+                          plots: _plots,
+                          onTapPlot: (plot) => Navigator.push<void>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  PlotDetailScreen(plot: plot, t: t),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -200,10 +225,7 @@ class WorkerHomeScreenState extends State<WorkerHomeScreen> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => TaskUpdateScreen(
-          task: task,
-          session: widget.session,
-        ),
+        builder: (_) => TaskUpdateScreen(task: task, session: widget.session),
       ),
     );
     await _load();
@@ -213,11 +235,7 @@ class WorkerHomeScreenState extends State<WorkerHomeScreen> {
 // ── Header ────────────────────────────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
-  const _Header({
-    required this.t,
-    required this.lang,
-    required this.session,
-  });
+  const _Header({required this.t, required this.lang, required this.session});
 
   final AppText t;
   final AppLanguage lang;
@@ -701,10 +719,7 @@ class _FieldWorkTaskCard extends StatelessWidget {
                           const SizedBox(width: 8),
                         ],
                         Flexible(
-                          child: _TaskStatusChip(
-                            status: task.taskStatus,
-                            t: t,
-                          ),
+                          child: _TaskStatusChip(status: task.taskStatus, t: t),
                         ),
                       ],
                     ),
@@ -818,51 +833,37 @@ class _OverviewSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 130,
-      child: Row(
-        children: [
-          Expanded(
-            child: OmEarthOverviewMetricCard(
-              value: '$treesToday',
-              label: t.statTreesToday,
-              illustrationAsset: ImageConstants.seedling,
-              accentColor: ColorConstants.forestGreen,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: OmEarthOverviewMetricCard(
-              value: '$actionableCount',
-              label: t.tasksAssigned,
-              illustrationAsset: ImageConstants.pendingTask,
-              accentColor: actionableCount > 0
-                  ? ColorConstants.warningColor
-                  : ColorConstants.infoColor,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: OmEarthOverviewMetricCard(
-              value: '$plantedCount',
-              label: t.planted,
-              illustrationAsset: ImageConstants.matureTree,
-              accentColor: ColorConstants.successColor,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: OmEarthOverviewMetricCard(
-              value: '$plotCount',
-              label: t.myPlots,
-              illustrationAsset: ImageConstants.leafSprig,
-              accentColor: plotCount > 0
-                  ? ColorConstants.forestGreen
-                  : ColorConstants.mutedText,
-            ),
-          ),
-        ],
-      ),
+    return OmEarthOverviewMetricGrid(
+      children: [
+        OmEarthOverviewMetricCard(
+          value: '$treesToday',
+          label: t.statTreesToday,
+          illustrationAsset: ImageConstants.seedling,
+          accentColor: ColorConstants.forestGreen,
+        ),
+        OmEarthOverviewMetricCard(
+          value: '$actionableCount',
+          label: t.tasksAssigned,
+          illustrationAsset: ImageConstants.pendingTask,
+          accentColor: actionableCount > 0
+              ? ColorConstants.warningColor
+              : ColorConstants.infoColor,
+        ),
+        OmEarthOverviewMetricCard(
+          value: '$plantedCount',
+          label: t.planted,
+          illustrationAsset: ImageConstants.matureTree,
+          accentColor: ColorConstants.successColor,
+        ),
+        OmEarthOverviewMetricCard(
+          value: '$plotCount',
+          label: t.myPlots,
+          illustrationAsset: ImageConstants.leafSprig,
+          accentColor: plotCount > 0
+              ? ColorConstants.forestGreen
+              : ColorConstants.mutedText,
+        ),
+      ],
     );
   }
 }
@@ -870,11 +871,7 @@ class _OverviewSummary extends StatelessWidget {
 // ── Tasks list ────────────────────────────────────────────────────────────────
 
 class _TasksList extends StatelessWidget {
-  const _TasksList({
-    required this.t,
-    required this.tasks,
-    required this.onTap,
-  });
+  const _TasksList({required this.t, required this.tasks, required this.onTap});
 
   final AppText t;
   final List<TreeTaskModel> tasks;
@@ -921,11 +918,7 @@ class _TasksList extends StatelessWidget {
     return Column(
       children: [
         for (int i = 0; i < tasks.length; i++) ...[
-          _TaskMiniRow(
-            t: t,
-            task: tasks[i],
-            onTap: () => onTap(tasks[i]),
-          ),
+          _TaskMiniRow(t: t, task: tasks[i], onTap: () => onTap(tasks[i])),
           if (i < tasks.length - 1) const SizedBox(height: 10),
         ],
       ],
@@ -945,18 +938,18 @@ class _TaskMiniRow extends StatelessWidget {
   final VoidCallback onTap;
 
   Color get _color => switch (task.taskStatus) {
-        TaskStatus.pending => ColorConstants.warningColor,
-        TaskStatus.assigned => ColorConstants.infoColor,
-        TaskStatus.planted => ColorConstants.successColor,
-        TaskStatus.cancelled => ColorConstants.mutedText,
-      };
+    TaskStatus.pending => ColorConstants.warningColor,
+    TaskStatus.assigned => ColorConstants.infoColor,
+    TaskStatus.planted => ColorConstants.successColor,
+    TaskStatus.cancelled => ColorConstants.mutedText,
+  };
 
   String _statusLabel() => switch (task.taskStatus) {
-        TaskStatus.pending => t.unassigned,
-        TaskStatus.assigned => t.assigned,
-        TaskStatus.planted => t.planted,
-        TaskStatus.cancelled => 'Cancelled',
-      };
+    TaskStatus.pending => t.unassigned,
+    TaskStatus.assigned => t.assigned,
+    TaskStatus.planted => t.planted,
+    TaskStatus.cancelled => 'Cancelled',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -974,10 +967,7 @@ class _TaskMiniRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
             ),
             padding: const EdgeInsets.all(8),
-            child: Image.asset(
-              ImageConstants.seedling,
-              fit: BoxFit.contain,
-            ),
+            child: Image.asset(ImageConstants.seedling, fit: BoxFit.contain),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1035,10 +1025,15 @@ class _TaskMiniRow extends StatelessWidget {
 // ── Plots ─────────────────────────────────────────────────────────────────────
 
 class _PlotsMiniList extends StatelessWidget {
-  const _PlotsMiniList({required this.t, required this.plots});
+  const _PlotsMiniList({
+    required this.t,
+    required this.plots,
+    required this.onTapPlot,
+  });
 
   final AppText t;
   final List<PlotModel> plots;
+  final ValueChanged<PlotModel> onTapPlot;
 
   @override
   Widget build(BuildContext context) {
@@ -1073,7 +1068,7 @@ class _PlotsMiniList extends StatelessWidget {
     return Column(
       children: [
         for (int i = 0; i < plots.length; i++) ...[
-          _PlotMiniRow(t: t, plot: plots[i]),
+          _PlotMiniRow(t: t, plot: plots[i], onTap: () => onTapPlot(plots[i])),
           if (i < plots.length - 1) const SizedBox(height: 10),
         ],
       ],
@@ -1082,26 +1077,32 @@ class _PlotsMiniList extends StatelessWidget {
 }
 
 class _PlotMiniRow extends StatelessWidget {
-  const _PlotMiniRow({required this.t, required this.plot});
+  const _PlotMiniRow({
+    required this.t,
+    required this.plot,
+    required this.onTap,
+  });
 
   final AppText t;
   final PlotModel plot;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final status = switch (plot.status) {
       PlotStatus.healthy => (t.statusHealthy, ColorConstants.successColor),
       PlotStatus.needsCheck => (
-          t.statusNeedsCheck,
-          ColorConstants.warningColor,
-        ),
+        t.statusNeedsCheck,
+        ColorConstants.warningColor,
+      ),
       PlotStatus.inspectionDue => (
-          t.statusInspectionDue,
-          ColorConstants.infoColor,
-        ),
+        t.statusInspectionDue,
+        ColorConstants.infoColor,
+      ),
     };
 
     return OmEarthCard(
+      onTap: onTap,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       radius: 20,
       child: Row(

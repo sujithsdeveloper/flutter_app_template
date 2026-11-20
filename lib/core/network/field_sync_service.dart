@@ -3,10 +3,12 @@ import 'package:mess_app/core/database/db_constants.dart';
 import 'package:mess_app/core/network/field_api_service.dart';
 import 'package:mess_app/data/models/plot_model.dart';
 import 'package:mess_app/data/models/sync_status.dart';
+import 'package:mess_app/data/models/tree_model.dart';
 import 'package:mess_app/data/models/tree_task_model.dart';
 import 'package:mess_app/data/models/worker_model.dart';
 import 'package:mess_app/data/repositories/plot_repository.dart';
 import 'package:mess_app/data/repositories/sync_repository.dart';
+import 'package:mess_app/data/repositories/tree_repository.dart';
 import 'package:mess_app/data/repositories/tree_task_repository.dart';
 import 'package:mess_app/data/repositories/worker_plot_repository.dart';
 import 'package:mess_app/data/repositories/worker_repository.dart';
@@ -20,12 +22,14 @@ class FieldSyncService {
     required WorkerRepository workerRepository,
     required WorkerPlotRepository workerPlotRepository,
     required TreeTaskRepository taskRepository,
+    required TreeRepository treeRepository,
     required SyncRepository syncRepository,
   }) : _api = api,
        _plots = plotRepository,
        _workers = workerRepository,
        _workerPlots = workerPlotRepository,
        _tasks = taskRepository,
+       _trees = treeRepository,
        _sync = syncRepository;
 
   final FieldApiService _api;
@@ -33,6 +37,7 @@ class FieldSyncService {
   final WorkerRepository _workers;
   final WorkerPlotRepository _workerPlots;
   final TreeTaskRepository _tasks;
+  final TreeRepository _trees;
   final SyncRepository _sync;
 
   Future<void> pullAndApply() async {
@@ -64,6 +69,13 @@ class FieldSyncService {
       }
     }
     await _plots.replaceAll(syncedPlots);
+    final workerId = payload['workerId'];
+    if (workerId is String && workerId.isNotEmpty) {
+      await _workerPlots.setAssignments(
+        workerId,
+        syncedPlots.map((plot) => plot.id).toList(),
+      );
+    }
 
     final workers = payload['workers'];
     if (workers is List) {
@@ -94,8 +106,22 @@ class FieldSyncService {
     }
     await _tasks.replaceAll(syncedTasks);
 
+    final trees = payload['trees'];
+    if (trees is List) {
+      await _trees.applyFieldTrees([
+        for (final raw in trees.whereType<Map>())
+          TreeModel.fromFieldApi(Map<String, dynamic>.from(raw)),
+      ]);
+    }
+
     await _sync.setLastSyncTime(now);
     AppLogger.response('[FieldSyncService] sync applied');
+  }
+
+  Future<TreeTaskModel> cacheTask(Map<String, dynamic> response) async {
+    final task = _taskFromApi(response, DateTime.now());
+    await _tasks.upsert(task);
+    return task;
   }
 
   PlotModel _plotFromApi(Map<String, dynamic> m, DateTime now) {
@@ -110,6 +136,7 @@ class FieldSyncService {
       id: id,
       serverId: id,
       name: (m['name'] ?? 'Plot').toString(),
+      regionName: regionName == null || regionName.isEmpty ? null : regionName,
       location: (location != null && location.isNotEmpty)
           ? location
           : (regionName != null && regionName.isNotEmpty)

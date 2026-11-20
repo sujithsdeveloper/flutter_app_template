@@ -22,22 +22,22 @@ enum GrowthStage {
   dead;
 
   static GrowthStage fromValue(String v) => switch (v) {
-        'sprouting' => sprouting,
-        'growing' => growing,
-        'established' => established,
-        'needs_attention' => needsAttention,
-        'dead' => dead,
-        _ => planted,
-      };
+    'sprouting' => sprouting,
+    'growing' => growing,
+    'established' => established,
+    'needs_attention' => needsAttention,
+    'dead' => dead,
+    _ => planted,
+  };
 
   String get value => switch (this) {
-        planted => 'planted',
-        sprouting => 'sprouting',
-        growing => 'growing',
-        established => 'established',
-        needsAttention => 'needs_attention',
-        dead => 'dead',
-      };
+    planted => 'planted',
+    sprouting => 'sprouting',
+    growing => 'growing',
+    established => 'established',
+    needsAttention => 'needs_attention',
+    dead => 'dead',
+  };
 }
 
 /// A single growth-stage entry recorded by a worker for one of their trees.
@@ -50,6 +50,7 @@ class TreeGrowthUpdateModel {
     this.notes,
     this.photoPath,
     this.recordedBy,
+    this.recordedByName,
     required this.recordedAt,
     this.syncStatus = SyncStatus.pending,
     this.retryCount = 0,
@@ -67,6 +68,7 @@ class TreeGrowthUpdateModel {
 
   /// Worker ID who recorded this update.
   final String? recordedBy;
+  final String? recordedByName;
 
   final DateTime recordedAt;
   final SyncStatus syncStatus;
@@ -74,6 +76,25 @@ class TreeGrowthUpdateModel {
   final String? lastError;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  factory TreeGrowthUpdateModel.fromApi(Map<String, dynamic> map) {
+    final recordedAt = DateTime.parse(map['recordedAt'] as String);
+    final photoUrl = map['photoUrl'] as String?;
+    return TreeGrowthUpdateModel(
+      id: map['id'] as String,
+      treeId: map['treeId'] as String,
+      stage: GrowthStage.fromValue(map['stage'] as String),
+      heightCm: (map['heightCm'] as num?)?.toDouble(),
+      notes: map['notes'] as String?,
+      photoPath: photoUrl == null || photoUrl.isEmpty ? null : photoUrl,
+      recordedBy: map['recordedBy'] as String?,
+      recordedByName: map['recordedByName'] as String?,
+      recordedAt: recordedAt,
+      syncStatus: SyncStatus.synced,
+      createdAt: recordedAt,
+      updatedAt: recordedAt,
+    );
+  }
 
   factory TreeGrowthUpdateModel.fromMap(Map<String, dynamic> map) {
     return TreeGrowthUpdateModel(

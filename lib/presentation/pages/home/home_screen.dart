@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../trees/field_campaigns_screen.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 import 'package:mess_app/core/auth/session_manager.dart';
@@ -40,8 +41,7 @@ class HomeScreen extends StatelessWidget {
       body: SafeArea(
         bottom: false,
         child: BlocConsumer<DashboardCubit, DashboardState>(
-          listenWhen: (prev, curr) =>
-              curr.syncJobStatus != prev.syncJobStatus,
+          listenWhen: (prev, curr) => curr.syncJobStatus != prev.syncJobStatus,
           listener: (context, state) {
             if (state.syncJobStatus == SyncJobStatus.succeeded) {
               // Cubits are created at app root before login/sync — refresh
@@ -71,8 +71,7 @@ class HomeScreen extends StatelessWidget {
                 return RefreshIndicator(
                   color: ColorConstants.forestGreen,
                   backgroundColor: ColorConstants.cardSurface,
-                  onRefresh: () =>
-                      context.read<DashboardCubit>().triggerSync(),
+                  onRefresh: () => context.read<DashboardCubit>().triggerSync(),
                   child: ListView(
                     padding: EdgeInsets.fromLTRB(
                       20,
@@ -109,6 +108,18 @@ class HomeScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 14),
                       _QuickActions(t: t, onOpenTab: onOpenTab),
+                      OutlinedButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const FieldCampaignsScreen(),
+                          ),
+                        ),
+                        icon: const Icon(Icons.forest_outlined),
+                        label: const Text(
+                          'Corporate campaigns and allocations',
+                        ),
+                      ),
+
                       const SizedBox(height: 28),
                       _WorkersSectionHeader(
                         t: t,
@@ -153,11 +164,7 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-void _openPlotDetail(
-  BuildContext context,
-  AppText t,
-  PlotModel plot,
-) {
+void _openPlotDetail(BuildContext context, AppText t, PlotModel plot) {
   Navigator.push<void>(
     context,
     MaterialPageRoute(
@@ -1043,51 +1050,37 @@ class _OverviewSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 130,
-      child: Row(
-        children: [
-          Expanded(
-            child: OmEarthOverviewMetricCard(
-              value: '${dashState.treesRegisteredToday}',
-              label: t.statTreesToday,
-              illustrationAsset: ImageConstants.seedling,
-              accentColor: ColorConstants.forestGreen,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: OmEarthOverviewMetricCard(
-              value: '${dashState.workerCount}',
-              label: t.workers,
-              illustrationAsset: ImageConstants.volunteerTeam,
-              accentColor: ColorConstants.infoColor,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: OmEarthOverviewMetricCard(
-              value: '${dashState.pendingTasksCount}',
-              label: t.pendingTasks,
-              illustrationAsset: ImageConstants.pendingTask,
-              accentColor: dashState.pendingTasksCount > 0
-                  ? ColorConstants.warningColor
-                  : ColorConstants.successColor,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: OmEarthOverviewMetricCard(
-              value: '${dashState.pendingSync}',
-              label: t.statPendingSync,
-              illustrationAsset: ImageConstants.leafSprig,
-              accentColor: dashState.pendingSync > 0
-                  ? ColorConstants.warningColor
-                  : ColorConstants.successColor,
-            ),
-          ),
-        ],
-      ),
+    return OmEarthOverviewMetricGrid(
+      children: [
+        OmEarthOverviewMetricCard(
+          value: '${dashState.treesRegisteredToday}',
+          label: t.statTreesToday,
+          illustrationAsset: ImageConstants.seedling,
+          accentColor: ColorConstants.forestGreen,
+        ),
+        OmEarthOverviewMetricCard(
+          value: '${dashState.workerCount}',
+          label: t.workers,
+          illustrationAsset: ImageConstants.volunteerTeam,
+          accentColor: ColorConstants.infoColor,
+        ),
+        OmEarthOverviewMetricCard(
+          value: '${dashState.pendingTasksCount}',
+          label: t.pendingTasks,
+          illustrationAsset: ImageConstants.pendingTask,
+          accentColor: dashState.pendingTasksCount > 0
+              ? ColorConstants.warningColor
+              : ColorConstants.successColor,
+        ),
+        OmEarthOverviewMetricCard(
+          value: '${dashState.pendingSync}',
+          label: t.statPendingSync,
+          illustrationAsset: ImageConstants.leafSprig,
+          accentColor: dashState.pendingSync > 0
+              ? ColorConstants.warningColor
+              : ColorConstants.successColor,
+        ),
+      ],
     );
   }
 }

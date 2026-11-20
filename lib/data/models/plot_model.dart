@@ -28,6 +28,7 @@ class PlotModel {
     this.serverId,
     required this.name,
     required this.location,
+    this.regionName,
     this.district,
     this.latitude,
     this.longitude,
@@ -45,6 +46,7 @@ class PlotModel {
   final String? serverId;
   final String name;
   final String location;
+  final String? regionName;
   final String? district;
   final double? latitude;
   final double? longitude;
@@ -65,6 +67,7 @@ class PlotModel {
       serverId: map[DbConstants.colServerId] as String?,
       name: map[DbConstants.colName] as String,
       location: map[DbConstants.colLocation] as String,
+      regionName: map[DbConstants.colRegionName] as String?,
       district: map[DbConstants.colDistrict] as String?,
       latitude: map[DbConstants.colLatitude] as double?,
       longitude: map[DbConstants.colLongitude] as double?,
@@ -98,6 +101,7 @@ class PlotModel {
       DbConstants.colServerId: serverId,
       DbConstants.colName: name,
       DbConstants.colLocation: location,
+      DbConstants.colRegionName: regionName,
       DbConstants.colDistrict: district,
       DbConstants.colLatitude: latitude,
       DbConstants.colLongitude: longitude,
@@ -136,6 +140,7 @@ class PlotModel {
       serverId: serverId ?? this.serverId,
       name: name ?? this.name,
       location: location ?? this.location,
+      regionName: regionName,
       district: clearDistrict ? null : (district ?? this.district),
       latitude: clearLatitude ? null : (latitude ?? this.latitude),
       longitude: clearLongitude ? null : (longitude ?? this.longitude),

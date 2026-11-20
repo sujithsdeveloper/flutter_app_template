@@ -57,6 +57,7 @@ class DependencyInjection {
         workerRepository: getIt<WorkerRepository>(),
         workerPlotRepository: getIt<WorkerPlotRepository>(),
         taskRepository: getIt<TreeTaskRepository>(),
+        treeRepository: getIt<TreeRepository>(),
         syncRepository: getIt<SyncRepository>(),
       ),
     );

@@ -6,7 +6,7 @@ enum TaskStatus {
   /// Created from sponsorship (or admin), no worker assigned yet.
   pending,
 
-  /// Volunteer assigned a worker; not yet planted.
+  /// A field admin or field volunteer is responsible for planting.
   assigned,
 
   /// Tree has been planted and registered in the field.
@@ -37,9 +37,8 @@ enum TaskStatus {
 /// A tree planting task created from a sponsorship (or admin) for this
 /// volunteer's region. Unassigned tasks have no [workerId] yet.
 ///
-/// Volunteer admins assign a field worker in one step (backend auto-sets
-/// volunteer_id). They do not claim tasks for themselves.
-/// The worker plants at ([latitude], [longitude]).
+/// Field admins can assign a field volunteer or plant the tree themselves.
+/// The planter records the actual planting location.
 class TreeTaskModel {
   const TreeTaskModel({
     required this.id,
@@ -110,6 +109,11 @@ class TreeTaskModel {
   final String? regionId;
   final String? regionName;
   final String? sponsorshipId;
+
+  bool isSelfAssignedTo(String volunteerId) =>
+      this.volunteerId == volunteerId &&
+      (workerId == null || workerId!.isEmpty) &&
+      taskStatus != TaskStatus.pending;
 
   final TaskStatus taskStatus;
   final SyncStatus syncStatus;

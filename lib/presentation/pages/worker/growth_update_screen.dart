@@ -12,6 +12,7 @@ import 'package:mess_app/data/models/tree_growth_update_model.dart';
 import 'package:mess_app/data/repositories/tree_growth_repository.dart';
 import 'package:mess_app/presentation/widgets/primary_button.dart';
 import 'package:mess_app/presentation/widgets/snackbar_helper.dart';
+import 'package:mess_app/presentation/widgets/tree_photo_capture.dart';
 import 'package:uuid/uuid.dart';
 
 /// Records a new [TreeGrowthUpdateModel] for a planted tree.
@@ -22,11 +23,15 @@ class GrowthUpdateScreen extends StatefulWidget {
     required this.treeId,
     required this.workerId,
     required this.species,
+    this.requireServerSave = false,
+    this.cacheLocally = true,
   });
 
   final String treeId;
   final String workerId;
   final String? species;
+  final bool requireServerSave;
+  final bool cacheLocally;
 
   @override
   State<GrowthUpdateScreen> createState() => _GrowthUpdateScreenState();
@@ -51,52 +56,9 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
 
   // ── Photo ─────────────────────────────────────────────────────────────────
 
-  Future<void> _pickImage(ImageSource source) async {
-    final image = await ImagePicker().pickImage(
-      source: source,
-      imageQuality: 72,
-      maxWidth: 1280,
-    );
-    if (image != null && mounted) setState(() => _photoPath = image.path);
-  }
-
-  void _showPhotoSheet(AppText t) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: ColorConstants.borderGrey,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              _SheetTile(
-                icon: Icons.camera_alt_rounded,
-                label: t.takePhoto,
-                onTap: () { Navigator.pop(ctx); _pickImage(ImageSource.camera); },
-              ),
-              const SizedBox(height: 8),
-              _SheetTile(
-                icon: Icons.photo_library_rounded,
-                label: t.fromGallery,
-                onTap: () { Navigator.pop(ctx); _pickImage(ImageSource.gallery); },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  Future<void> _takePhoto(AppText t) async {
+    final path = await captureTreePhoto(context, t);
+    if (mounted && path != null) setState(() => _photoPath = path);
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────
@@ -111,34 +73,47 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
           : _notesCtrl.text.trim();
 
       var syncStatus = SyncStatus.pending;
+      var updateId = const Uuid().v4();
+      var storedPhoto = _photoPath;
       try {
-        await _fieldApi.createGrowthUpdate(
+        final uploaded = _photoPath == null
+            ? null
+            : await _fieldApi.uploadGrowthPhoto(
+                await XFile(_photoPath!).readAsBytes(),
+              );
+        final saved = await _fieldApi.createGrowthUpdate(
           treeId: widget.treeId,
           stage: _stage.value,
           heightCm: heightCm,
           notes: notes,
+          photoUrl: uploaded,
           recordedBy: widget.workerId,
         );
+        updateId = saved['id'] as String? ?? updateId;
         syncStatus = SyncStatus.synced;
+        storedPhoto = uploaded;
       } catch (e) {
+        if (widget.requireServerSave) rethrow;
         AppLogger.error('[GrowthUpdateScreen] remote save deferred: $e');
       }
 
-      await _repo.insert(
-        TreeGrowthUpdateModel(
-          id: const Uuid().v4(),
-          treeId: widget.treeId,
-          stage: _stage,
-          heightCm: heightCm,
-          notes: notes,
-          photoPath: _photoPath,
-          recordedBy: widget.workerId,
-          recordedAt: now,
-          syncStatus: syncStatus,
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      if (widget.cacheLocally) {
+        await _repo.insert(
+          TreeGrowthUpdateModel(
+            id: updateId,
+            treeId: widget.treeId,
+            stage: _stage,
+            heightCm: heightCm,
+            notes: notes,
+            photoPath: storedPhoto,
+            recordedBy: widget.workerId,
+            recordedAt: now,
+            syncStatus: syncStatus,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+      }
       if (!mounted) return;
       SnackbarHelper.showSucces(context: context, message: t.updateSaved);
       Navigator.pop(context, true);
@@ -146,7 +121,7 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
       if (!mounted) return;
       SnackbarHelper.showError(
         context: context,
-        message: 'Failed to save update: $e',
+        message: FieldApiService.messageOf(e),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -168,8 +143,10 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
             elevation: 0,
             surfaceTintColor: Colors.transparent,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded,
-                  color: ColorConstants.lightTextPrimary),
+              icon: const Icon(
+                Icons.arrow_back_rounded,
+                color: ColorConstants.lightTextPrimary,
+              ),
               onPressed: () => Navigator.pop(context),
             ),
             title: Text(
@@ -191,7 +168,9 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
                     // Tree name chip
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: ColorConstants.softGreen,
                         borderRadius: BorderRadius.circular(10),
@@ -199,8 +178,11 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.park_rounded,
-                              size: 14, color: ColorConstants.forestGreen),
+                          const Icon(
+                            Icons.park_rounded,
+                            size: 14,
+                            color: ColorConstants.forestGreen,
+                          ),
                           const SizedBox(width: 6),
                           Text(
                             widget.species ?? '—',
@@ -232,7 +214,8 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
                       child: TextField(
                         controller: _heightCtrl,
                         keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
+                          decimal: true,
+                        ),
                         textInputAction: TextInputAction.next,
                         decoration: InputDecoration(
                           hintText: t.heightHint,
@@ -307,8 +290,12 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: Image.file(File(_photoPath!),
-                height: 180, width: double.infinity, fit: BoxFit.cover),
+            child: Image.file(
+              File(_photoPath!),
+              height: 180,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
           ),
           const SizedBox(height: 8),
           Row(
@@ -317,12 +304,13 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.refresh_rounded, size: 16),
                   label: const Text('Retake'),
-                  onPressed: () => _showPhotoSheet(t),
+                  onPressed: () => _takePhoto(t),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: ColorConstants.lightTextSecondary,
                     side: const BorderSide(color: ColorConstants.borderGrey),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
               ),
@@ -335,9 +323,12 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: ColorConstants.errorColor,
                     side: const BorderSide(
-                        color: ColorConstants.errorColor, width: 0.8),
+                      color: ColorConstants.errorColor,
+                      width: 0.8,
+                    ),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
               ),
@@ -347,7 +338,7 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
       );
     }
     return GestureDetector(
-      onTap: () => _showPhotoSheet(t),
+      onTap: () => _takePhoto(t),
       child: Container(
         height: 100,
         width: double.infinity,
@@ -359,13 +350,18 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.add_a_photo_outlined,
-                size: 28, color: ColorConstants.lightTextSecondary),
+            const Icon(
+              Icons.add_a_photo_outlined,
+              size: 28,
+              color: ColorConstants.lightTextSecondary,
+            ),
             const SizedBox(height: 6),
             Text(
               t.takePhoto,
               style: const TextStyle(
-                  fontSize: 13, color: ColorConstants.lightTextSecondary),
+                fontSize: 13,
+                color: ColorConstants.lightTextSecondary,
+              ),
             ),
           ],
         ),
@@ -374,24 +370,24 @@ class _GrowthUpdateScreenState extends State<GrowthUpdateScreen> {
   }
 
   Widget _sectionLabel(String label) => Text(
-        label.toUpperCase(),
-        style: const TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.8,
-          color: ColorConstants.lightTextSecondary,
-        ),
-      );
+    label.toUpperCase(),
+    style: const TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.8,
+      color: ColorConstants.lightTextSecondary,
+    ),
+  );
 
   Widget _card({required Widget child}) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        decoration: BoxDecoration(
-          color: ColorConstants.lightCard,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: ColorConstants.borderGrey),
-        ),
-        child: child,
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+    decoration: BoxDecoration(
+      color: ColorConstants.lightCard,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: ColorConstants.borderGrey),
+    ),
+    child: child,
+  );
 }
 
 // ── Stage selector ────────────────────────────────────────────────────────────
@@ -425,24 +421,26 @@ class _StageSelector extends StatelessWidget {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       children: stages
-          .map((s) => _StageCard(
-                stage: s,
-                selected: s == selected,
-                label: _stageLabel(s),
-                onTap: () => onSelect(s),
-              ))
+          .map(
+            (s) => _StageCard(
+              stage: s,
+              selected: s == selected,
+              label: _stageLabel(s),
+              onTap: () => onSelect(s),
+            ),
+          )
           .toList(),
     );
   }
 
   String _stageLabel(GrowthStage s) => switch (s) {
-        GrowthStage.planted => t.stagePlanted,
-        GrowthStage.sprouting => t.stageSprouting,
-        GrowthStage.growing => t.stageGrowing,
-        GrowthStage.established => t.stageEstablished,
-        GrowthStage.needsAttention => t.stageNeedsAttention,
-        GrowthStage.dead => t.stageDead,
-      };
+    GrowthStage.planted => t.stagePlanted,
+    GrowthStage.sprouting => t.stageSprouting,
+    GrowthStage.growing => t.stageGrowing,
+    GrowthStage.established => t.stageEstablished,
+    GrowthStage.needsAttention => t.stageNeedsAttention,
+    GrowthStage.dead => t.stageDead,
+  };
 }
 
 class _StageCard extends StatelessWidget {
@@ -459,16 +457,19 @@ class _StageCard extends StatelessWidget {
   final VoidCallback onTap;
 
   static (IconData, Color) _meta(GrowthStage s) => switch (s) {
-        GrowthStage.planted => (Icons.eco_rounded, const Color(0xFF4CAF50)),
-        GrowthStage.sprouting => (Icons.nature_rounded, const Color(0xFF81C784)),
-        GrowthStage.growing => (Icons.park_rounded, ColorConstants.forestGreen),
-        GrowthStage.established =>
-          (Icons.forest_rounded, const Color(0xFF2E7D32)),
-        GrowthStage.needsAttention =>
-          (Icons.warning_amber_rounded, ColorConstants.warningColor),
-        GrowthStage.dead =>
-          (Icons.sentiment_very_dissatisfied_rounded, ColorConstants.errorColor),
-      };
+    GrowthStage.planted => (Icons.eco_rounded, const Color(0xFF4CAF50)),
+    GrowthStage.sprouting => (Icons.nature_rounded, const Color(0xFF81C784)),
+    GrowthStage.growing => (Icons.park_rounded, ColorConstants.forestGreen),
+    GrowthStage.established => (Icons.forest_rounded, const Color(0xFF2E7D32)),
+    GrowthStage.needsAttention => (
+      Icons.warning_amber_rounded,
+      ColorConstants.warningColor,
+    ),
+    GrowthStage.dead => (
+      Icons.sentiment_very_dissatisfied_rounded,
+      ColorConstants.errorColor,
+    ),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -500,51 +501,11 @@ class _StageCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11,
-                fontWeight:
-                    selected ? FontWeight.w700 : FontWeight.w500,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                 color: selected ? color : ColorConstants.lightTextSecondary,
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Sheet tile ────────────────────────────────────────────────────────────────
-
-class _SheetTile extends StatelessWidget {
-  const _SheetTile(
-      {required this.icon, required this.label, required this.onTap});
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: ColorConstants.lightCard,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Icon(icon, size: 22, color: ColorConstants.forestGreen),
-              const SizedBox(width: 14),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: ColorConstants.lightTextPrimary,
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );

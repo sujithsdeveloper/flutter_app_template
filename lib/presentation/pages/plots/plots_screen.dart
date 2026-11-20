@@ -36,7 +36,8 @@ class _PlotsScreenState extends State<PlotsScreen> {
     return plots.where((p) {
       return p.name.toLowerCase().contains(q) ||
           p.location.toLowerCase().contains(q) ||
-          (p.district?.toLowerCase().contains(q) ?? false);
+          (p.district?.toLowerCase().contains(q) ?? false) ||
+          (p.regionName?.toLowerCase().contains(q) ?? false);
     }).toList();
   }
 
@@ -75,29 +76,41 @@ class _PlotsScreenState extends State<PlotsScreen> {
                         return _EmptyPlots(t: t);
                       }
 
+                      final regions = <String, List<PlotModel>>{};
+                      for (final plot in items) {
+                        final region = plot.regionName ?? t.regionUnassigned;
+                        (regions[region] ??= []).add(plot);
+                      }
+
                       return RefreshIndicator(
                         color: ColorConstants.forestGreen,
                         backgroundColor: ColorConstants.cardSurface,
                         onRefresh: () =>
-                            context.read<DashboardCubit>().refresh(),
-                        child: ListView.separated(
+                            context.read<DashboardCubit>().triggerSync(),
+                        child: ListView(
                           padding: EdgeInsets.fromLTRB(
                             20,
                             0,
                             20,
                             omEarthBottomScrollPadding(context),
                           ),
-                          itemCount: items.length,
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(height: 10),
-                          itemBuilder: (context, i) {
-                            final plot = items[i];
-                            return _PlotCard(
-                              t: t,
-                              plot: plot,
-                              onTap: () => _openPlotDetail(t, plot),
-                            );
-                          },
+                          children: [
+                            for (final region in regions.entries) ...[
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                child: OmEarthSectionHeader(title: region.key),
+                              ),
+                              for (final plot in region.value)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: _PlotCard(
+                                    t: t,
+                                    plot: plot,
+                                    onTap: () => _openPlotDetail(t, plot),
+                                  ),
+                                ),
+                            ],
+                          ],
                         ),
                       );
                     },

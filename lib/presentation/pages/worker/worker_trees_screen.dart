@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import '../trees/field_campaigns_screen.dart';
 import 'package:intl/intl.dart';
 import 'package:mess_app/core/auth/user_session.dart';
+import 'package:mess_app/core/constants/app_logger.dart';
 import 'package:mess_app/core/localization/app_language.dart';
+import 'package:mess_app/core/network/field_sync_service.dart';
 import 'package:mess_app/core/service_locator/di.dart';
 import 'package:mess_app/core/utils/constants/asset_constants.dart';
 import 'package:mess_app/core/utils/constants/color_constants.dart';
@@ -25,6 +28,8 @@ class _WorkerTreesScreenState extends State<WorkerTreesScreen> {
   List<TreeModel> _trees = [];
   Map<String, GrowthStage> _stages = {};
   bool _loading = true;
+  String _category = 'all';
+  int _campaignVersion = 0;
 
   final _treeRepo = getIt<TreeRepository>();
   final _growthRepo = getIt<TreeGrowthRepository>();
@@ -33,6 +38,18 @@ class _WorkerTreesScreenState extends State<WorkerTreesScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  Future<void> _refresh() async {
+    try {
+      await getIt<FieldSyncService>().pullAndApply();
+    } catch (e) {
+      AppLogger.error('[WorkerTreesScreen] refresh failed: $e');
+    }
+    if (mounted) {
+      await _load();
+      if (mounted) setState(() => _campaignVersion++);
+    }
   }
 
   Future<void> _load() async {
@@ -56,6 +73,15 @@ class _WorkerTreesScreenState extends State<WorkerTreesScreen> {
       valueListenable: LanguageController.language,
       builder: (context, lang, _) {
         final t = AppText(lang);
+        final visible = _trees
+            .where(
+              (tree) => switch (_category) {
+                'individual' => tree.sponsorshipCategory == 'individual',
+                'corporate' => tree.sponsorshipCategory == 'corporate',
+                _ => tree.sponsorshipCategory != 'corporate',
+              },
+            )
+            .toList();
         return Scaffold(
           backgroundColor: Colors.transparent,
           body: SafeArea(
@@ -65,8 +91,28 @@ class _WorkerTreesScreenState extends State<WorkerTreesScreen> {
               children: [
                 _TreesAppBar(
                   t: t,
-                  count: _loading ? null : _trees.length,
-                  onRefresh: _load,
+                  count: _loading || _category == 'corporate'
+                      ? null
+                      : visible.length,
+                  onRefresh: _refresh,
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final (value, label) in [
+                        ('all', 'All'),
+                        ('individual', 'Individual'),
+                        ('corporate', 'Corporate'),
+                      ])
+                        ChoiceChip(
+                          label: Text(label),
+                          selected: _category == value,
+                          onSelected: (_) => setState(() => _category = value),
+                        ),
+                    ],
+                  ),
                 ),
                 Expanded(
                   child: _loading
@@ -77,49 +123,75 @@ class _WorkerTreesScreenState extends State<WorkerTreesScreen> {
                             ),
                           ),
                         )
-                      : _trees.isEmpty
-                          ? _EmptyTrees(t: t)
-                          : RefreshIndicator(
-                              color: ColorConstants.forestGreen,
-                              backgroundColor: ColorConstants.cardSurface,
-                              onRefresh: _load,
-                              child: ListView(
-                                padding: EdgeInsets.fromLTRB(
-                                  20,
-                                  8,
-                                  20,
-                                  omEarthBottomScrollPadding(context),
-                                ),
-                                children: [
-                                  _SummaryChips(
-                                    t: t,
-                                    trees: _trees,
-                                    stages: _stages,
-                                  ),
-                                  const SizedBox(height: 14),
-                                  for (int i = 0; i < _trees.length; i++) ...[
-                                    _TreeCard(
-                                      tree: _trees[i],
-                                      stage: _stages[_trees[i].id] ??
-                                          GrowthStage.planted,
-                                      t: t,
-                                      onTap: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              WorkerTreeDetailScreen(
-                                            tree: _trees[i],
-                                            workerId: widget.session.userId,
-                                          ),
-                                        ),
-                                      ).then((_) => _load()),
-                                    ),
-                                    if (i < _trees.length - 1)
-                                      const SizedBox(height: 10),
-                                  ],
-                                ],
-                              ),
+                      : visible.isEmpty && _category == 'individual'
+                      ? _EmptyTrees(t: t)
+                      : RefreshIndicator(
+                          color: ColorConstants.forestGreen,
+                          backgroundColor: ColorConstants.cardSurface,
+                          onRefresh: _refresh,
+                          child: ListView(
+                            padding: EdgeInsets.fromLTRB(
+                              20,
+                              8,
+                              20,
+                              omEarthBottomScrollPadding(context),
                             ),
+                            children: [
+                              if (_category == 'corporate') ...[
+                                FieldCampaignsPanel(
+                                  key: ValueKey(_campaignVersion),
+                                ),
+                                const SizedBox(height: 12),
+                              ] else if (_category == 'all')
+                                TextButton(
+                                  onPressed: () =>
+                                      setState(() => _category = 'corporate'),
+                                  child: const Text(
+                                    'Browse corporate campaigns',
+                                  ),
+                                ),
+                              if (visible.isNotEmpty)
+                                _SummaryChips(
+                                  t: t,
+                                  trees: visible,
+                                  stages: _stages,
+                                ),
+                              const SizedBox(height: 14),
+                              for (int i = 0; i < visible.length; i++) ...[
+                                _TreeCard(
+                                  tree: visible[i],
+                                  stage:
+                                      _stages[visible[i].id] ??
+                                      GrowthStage.planted,
+                                  t: t,
+                                  planterName: widget.session.userName,
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => WorkerTreeDetailScreen(
+                                        tree: visible[i],
+                                        workerId: widget.session.userId,
+                                        syncGrowth: visible[i].serverId != null,
+                                      ),
+                                    ),
+                                  ).then((_) => _load()),
+                                ),
+                                if (i < visible.length - 1)
+                                  const SizedBox(height: 10),
+                              ],
+                              if (_category == 'all') ...[
+                                const SizedBox(height: 14),
+                                const OmEarthSectionHeader(
+                                  title: 'Corporate campaigns',
+                                ),
+                                const SizedBox(height: 8),
+                                FieldCampaignsPanel(
+                                  key: ValueKey(_campaignVersion),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                 ),
               ],
             ),
@@ -133,11 +205,7 @@ class _WorkerTreesScreenState extends State<WorkerTreesScreen> {
 // ── App bar ───────────────────────────────────────────────────────────────────
 
 class _TreesAppBar extends StatelessWidget {
-  const _TreesAppBar({
-    required this.t,
-    this.count,
-    required this.onRefresh,
-  });
+  const _TreesAppBar({required this.t, this.count, required this.onRefresh});
 
   final AppText t;
   final int? count;
@@ -317,40 +385,44 @@ class _TreeCard extends StatelessWidget {
     required this.tree,
     required this.stage,
     required this.t,
+    required this.planterName,
     required this.onTap,
   });
 
   final TreeModel tree;
   final GrowthStage stage;
+  final String planterName;
   final AppText t;
   final VoidCallback onTap;
 
   static Color _stageColor(GrowthStage s) => switch (s) {
-        GrowthStage.planted => const Color(0xFF4CAF50),
-        GrowthStage.sprouting => const Color(0xFF81C784),
-        GrowthStage.growing => ColorConstants.forestGreen,
-        GrowthStage.established => const Color(0xFF2E7D32),
-        GrowthStage.needsAttention => ColorConstants.warningColor,
-        GrowthStage.dead => ColorConstants.errorColor,
-      };
+    GrowthStage.planted => const Color(0xFF4CAF50),
+    GrowthStage.sprouting => const Color(0xFF81C784),
+    GrowthStage.growing => ColorConstants.forestGreen,
+    GrowthStage.established => const Color(0xFF2E7D32),
+    GrowthStage.needsAttention => ColorConstants.warningColor,
+    GrowthStage.dead => ColorConstants.errorColor,
+  };
 
   String _stageName(GrowthStage s) => switch (s) {
-        GrowthStage.planted => t.stagePlanted,
-        GrowthStage.sprouting => t.stageSprouting,
-        GrowthStage.growing => t.stageGrowing,
-        GrowthStage.established => t.stageEstablished,
-        GrowthStage.needsAttention => t.stageNeedsAttention,
-        GrowthStage.dead => t.stageDead,
-      };
+    GrowthStage.planted => t.stagePlanted,
+    GrowthStage.sprouting => t.stageSprouting,
+    GrowthStage.growing => t.stageGrowing,
+    GrowthStage.established => t.stageEstablished,
+    GrowthStage.needsAttention => t.stageNeedsAttention,
+    GrowthStage.dead => t.stageDead,
+  };
 
   @override
   Widget build(BuildContext context) {
     final color = _stageColor(stage);
     final planted = tree.plantingDate;
-    final days =
-        planted != null ? DateTime.now().difference(planted).inDays : null;
-    final plantedStr =
-        planted != null ? DateFormat('dd MMM yyyy').format(planted) : '—';
+    final days = planted != null
+        ? DateTime.now().difference(planted).inDays
+        : null;
+    final plantedStr = planted != null
+        ? DateFormat('dd MMM yyyy').format(planted)
+        : '—';
 
     return OmEarthCard(
       onTap: onTap,
@@ -366,10 +438,7 @@ class _TreeCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
             ),
             padding: const EdgeInsets.all(8),
-            child: Image.asset(
-              ImageConstants.matureTree,
-              fit: BoxFit.contain,
-            ),
+            child: Image.asset(ImageConstants.matureTree, fit: BoxFit.contain),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -387,6 +456,23 @@ class _TreeCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 3),
+                Text(
+                  [
+                    tree.regionName,
+                    tree.plotName ?? tree.plotId,
+                  ].whereType<String>().join(' · '),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: ColorConstants.secondaryText,
+                  ),
+                ),
+                Text(
+                  '${t.plantedBy}: ${tree.plantedBy ?? planterName}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: ColorConstants.secondaryText,
+                  ),
+                ),
                 Text(
                   '${t.plantedOn}  $plantedStr',
                   style: const TextStyle(
@@ -408,10 +494,7 @@ class _TreeCard extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              OmEarthStatusChip(
-                label: _stageName(stage),
-                color: color,
-              ),
+              OmEarthStatusChip(label: _stageName(stage), color: color),
               const SizedBox(height: 6),
               const Icon(
                 Icons.chevron_right_rounded,

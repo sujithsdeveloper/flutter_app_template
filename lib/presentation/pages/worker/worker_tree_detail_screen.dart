@@ -1,8 +1,12 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:mess_app/core/constants/app_logger.dart';
 import 'package:mess_app/core/localization/app_language.dart';
+import 'package:mess_app/core/network/api_client.dart';
+import 'package:mess_app/core/network/field_api_service.dart';
 import 'package:mess_app/core/service_locator/di.dart';
 import 'package:mess_app/core/utils/constants/color_constants.dart';
 import 'package:mess_app/data/models/tree_growth_update_model.dart';
@@ -11,20 +15,24 @@ import 'package:mess_app/data/repositories/tree_growth_repository.dart';
 import 'package:mess_app/presentation/pages/worker/growth_update_screen.dart';
 
 /// Shows full details of a planted tree and its growth history.
-/// Field volunteers can add growth-stage updates; admin views are read-only.
+/// The planter can add growth updates and a supervisor can review them.
 class WorkerTreeDetailScreen extends StatefulWidget {
   const WorkerTreeDetailScreen({
     super.key,
     required this.tree,
     required this.workerId,
     this.readOnly = false,
+    this.syncGrowth = false,
   });
 
   final TreeModel tree;
   final String workerId;
 
-  /// When true (admin volunteer), growth history is visible but not editable.
+  /// Supervisors can view a field volunteer's tree without editing it.
   final bool readOnly;
+
+  /// A self-planted tree linked to the server has shared growth history.
+  final bool syncGrowth;
 
   @override
   State<WorkerTreeDetailScreen> createState() => _WorkerTreeDetailScreenState();
@@ -33,6 +41,7 @@ class WorkerTreeDetailScreen extends StatefulWidget {
 class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
   List<TreeGrowthUpdateModel> _updates = [];
   bool _loading = true;
+  Map<String, dynamic>? _details;
 
   final _repo = getIt<TreeGrowthRepository>();
 
@@ -44,8 +53,47 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final updates = await _repo.getForTree(widget.tree.id);
-    if (mounted) { setState(() { _updates = updates; _loading = false; }); }
+    final local = await _repo.getForTree(widget.tree.id);
+    var updates = local;
+    var details = _details;
+    if (widget.syncGrowth) {
+      final api = getIt<FieldApiService>();
+      final id = widget.tree.serverId ?? widget.tree.id;
+      try {
+        details = await api.fieldTreeDetails(id);
+      } catch (error) {
+        AppLogger.error(
+          '[WorkerTreeDetailScreen] tree details unavailable: $error',
+        );
+      }
+      try {
+        final remote = await api.listGrowthUpdates(id);
+        final byId = {for (final update in local) update.id: update};
+        for (final entry in remote) {
+          final update = TreeGrowthUpdateModel.fromApi(entry);
+          final localPhoto = byId[update.id]?.photoPath;
+          byId[update.id] = update.photoPath == null && localPhoto != null
+              ? TreeGrowthUpdateModel.fromApi({
+                  ...entry,
+                  'photoUrl': localPhoto,
+                })
+              : update;
+        }
+        updates = byId.values.toList()
+          ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
+      } catch (error) {
+        AppLogger.error(
+          '[WorkerTreeDetailScreen] growth history unavailable: $error',
+        );
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _updates = updates;
+        _details = details;
+        _loading = false;
+      });
+    }
   }
 
   GrowthStage get _currentStage =>
@@ -82,7 +130,9 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
               ),
             ],
           ),
-          floatingActionButton: widget.readOnly
+          floatingActionButton:
+              (_details?['canUpdate'] == false ||
+                  (_details?['canUpdate'] != true && widget.readOnly))
               ? null
               : FloatingActionButton.extended(
                   backgroundColor: ColorConstants.forestGreen,
@@ -97,9 +147,12 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (_) => GrowthUpdateScreen(
-                          treeId: widget.tree.id,
+                          treeId: widget.tree.serverId ?? widget.tree.id,
                           workerId: widget.workerId,
                           species: widget.tree.species,
+                          requireServerSave: widget.syncGrowth,
+                          cacheLocally:
+                              widget.tree.sponsorshipCategory != 'corporate',
                         ),
                       ),
                     ).then((saved) {
@@ -128,21 +181,31 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
           fit: StackFit.expand,
           children: [
             // Show latest photo or a gradient banner
-            Builder(builder: (_) {
-              final photoUpdate = _updates.cast<TreeGrowthUpdateModel?>()
-                  .firstWhere((u) => u?.photoPath != null, orElse: () => null);
-              final photoPath = photoUpdate?.photoPath;
-              if (photoPath != null) return _photoHero(photoPath);
-              return               Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF2E7D32), ColorConstants.forestGreen],
+            Builder(
+              builder: (_) {
+                final photoUpdate = _updates
+                    .cast<TreeGrowthUpdateModel?>()
+                    .firstWhere(
+                      (u) => u?.photoPath != null,
+                      orElse: () => null,
+                    );
+                final photoPath =
+                    photoUpdate?.photoPath ??
+                    _details?['initialPhoto'] as String?;
+                if (photoPath?.isNotEmpty == true) {
+                  return _TreePhoto(path: photoPath!, fit: BoxFit.cover);
+                }
+                return Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF2E7D32), ColorConstants.forestGreen],
+                    ),
                   ),
-                ),
-              );
-            }),
+                );
+              },
+            ),
             // Dark scrim for readability
             Container(
               decoration: BoxDecoration(
@@ -186,26 +249,19 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
     );
   }
 
-  Widget _photoHero(String path) {
-    return Image.file(
-      File(path),
-      fit: BoxFit.cover,
-      errorBuilder: (_, _, _) => Container(
-        color: ColorConstants.softGreen,
-        child: const Icon(Icons.park_rounded,
-            size: 64, color: ColorConstants.forestGreen),
-      ),
-    );
-  }
-
   Widget _buildInfoCard(AppText t) {
     final lat = widget.tree.latitude;
     final lng = widget.tree.longitude;
     final planted = widget.tree.plantingDate;
-    final daysGrowing =
-        planted != null ? DateTime.now().difference(planted).inDays : null;
+    final daysGrowing = planted != null
+        ? DateTime.now().difference(planted).inDays
+        : null;
     final notes = widget.tree.notes;
 
+    final category = _details?['category'] ?? widget.tree.sponsorshipCategory;
+    final status = _details?['status'] as String?;
+    final initial = _details?['initialPhoto'] as String?;
+    final latest = _updates.firstOrNull;
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -213,9 +269,80 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
           _label(t.treeDetails),
           const SizedBox(height: 10),
           _InfoRow(
+            icon: Icons.qr_code,
+            label: 'Tree ID',
+            value:
+                (_details?['qrCode'] ?? widget.tree.serverId ?? widget.tree.id)
+                    .toString(),
+          ),
+          if (category != null)
+            _InfoRow(
+              icon: Icons.eco_outlined,
+              label: 'Sponsorship',
+              value: switch (category) {
+                'corporate' => 'Corporate',
+                'individual' => 'Individual',
+                _ => 'Unsponsored',
+              },
+            ),
+          for (final (label, key) in [
+            ('Sponsor', 'sponsor'),
+            ('Campaign', 'campaign'),
+            ('Order', 'orderId'),
+            ('Batch', 'batchId'),
+            ('Planting session', 'sessionId'),
+          ])
+            if ((_details?[key] as String?)?.isNotEmpty == true)
+              _InfoRow(
+                icon: Icons.info_outline,
+                label: label,
+                value: _details![key] as String,
+              ),
+          if (planted != null)
+            _InfoRow(
+              icon: Icons.event_outlined,
+              label: t.plantedOn,
+              value: DateFormat.yMMMd().format(planted),
+            ),
+          _InfoRow(
+            icon: Icons.health_and_safety_outlined,
+            label: 'Survival status',
+            value:
+                widget.tree.isDead ||
+                    status == 'dead' ||
+                    _currentStage == GrowthStage.dead
+                ? 'Dead'
+                : status == 'replaced'
+                ? 'Replaced'
+                : status == 'needs_water'
+                ? 'Needs attention'
+                : 'Alive',
+          ),
+          if (latest?.recordedByName?.isNotEmpty == true)
+            _InfoRow(
+              icon: Icons.person_outline,
+              label: 'Latest update by',
+              value: latest!.recordedByName!,
+            ),
+          if (initial != null && initial.isNotEmpty) ...[
+            const Text('Initial planting photo'),
+            const SizedBox(height: 6),
+            _TreePhoto(path: initial, height: 120, fit: BoxFit.cover),
+          ],
+          _InfoRow(
             icon: Icons.location_on_rounded,
-            label: 'Plot',
-            value: widget.tree.plotId,
+            label: t.plotLabel,
+            value: widget.tree.plotName ?? widget.tree.plotId,
+          ),
+          _InfoRow(
+            icon: Icons.map_outlined,
+            label: t.regionLabel,
+            value: widget.tree.regionName ?? t.regionUnassigned,
+          ),
+          _InfoRow(
+            icon: Icons.person_outline_rounded,
+            label: t.plantedBy,
+            value: widget.tree.plantedBy ?? t.unknownPlanter,
           ),
           _InfoRow(
             icon: Icons.my_location_rounded,
@@ -329,8 +456,11 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
       ),
       child: Column(
         children: [
-          const Icon(Icons.timeline_rounded,
-              size: 36, color: ColorConstants.lightTextSecondary),
+          const Icon(
+            Icons.timeline_rounded,
+            size: 36,
+            color: ColorConstants.lightTextSecondary,
+          ),
           const SizedBox(height: 8),
           Text(
             t.noUpdatesYet,
@@ -347,37 +477,38 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   Widget _label(String text) => Text(
-        text.toUpperCase(),
-        style: const TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.8,
-          color: ColorConstants.lightTextSecondary,
-        ),
-      );
+    text.toUpperCase(),
+    style: const TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.8,
+      color: ColorConstants.lightTextSecondary,
+    ),
+  );
 
   static (IconData, Color) _stageStyle(GrowthStage s) => switch (s) {
-        GrowthStage.planted => (Icons.eco_rounded, const Color(0xFF4CAF50)),
-        GrowthStage.sprouting => (Icons.nature_rounded, const Color(0xFF81C784)),
-        GrowthStage.growing => (Icons.park_rounded, ColorConstants.forestGreen),
-        GrowthStage.established =>
-          (Icons.forest_rounded, const Color(0xFF2E7D32)),
-        GrowthStage.needsAttention =>
-          (Icons.warning_amber_rounded, ColorConstants.warningColor),
-        GrowthStage.dead => (
-            Icons.sentiment_very_dissatisfied_rounded,
-            ColorConstants.errorColor,
-          ),
-      };
+    GrowthStage.planted => (Icons.eco_rounded, const Color(0xFF4CAF50)),
+    GrowthStage.sprouting => (Icons.nature_rounded, const Color(0xFF81C784)),
+    GrowthStage.growing => (Icons.park_rounded, ColorConstants.forestGreen),
+    GrowthStage.established => (Icons.forest_rounded, const Color(0xFF2E7D32)),
+    GrowthStage.needsAttention => (
+      Icons.warning_amber_rounded,
+      ColorConstants.warningColor,
+    ),
+    GrowthStage.dead => (
+      Icons.sentiment_very_dissatisfied_rounded,
+      ColorConstants.errorColor,
+    ),
+  };
 
   static String _stageName(GrowthStage s, AppText t) => switch (s) {
-        GrowthStage.planted => t.stagePlanted,
-        GrowthStage.sprouting => t.stageSprouting,
-        GrowthStage.growing => t.stageGrowing,
-        GrowthStage.established => t.stageEstablished,
-        GrowthStage.needsAttention => t.stageNeedsAttention,
-        GrowthStage.dead => t.stageDead,
-      };
+    GrowthStage.planted => t.stagePlanted,
+    GrowthStage.sprouting => t.stageSprouting,
+    GrowthStage.growing => t.stageGrowing,
+    GrowthStage.established => t.stageEstablished,
+    GrowthStage.needsAttention => t.stageNeedsAttention,
+    GrowthStage.dead => t.stageDead,
+  };
 }
 
 // ── Timeline tile ─────────────────────────────────────────────────────────────
@@ -404,8 +535,9 @@ class _TimelineTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final (icon, color) = _stageStyle(update.stage);
     final label = _stageName(update.stage, t);
-    final dateStr =
-        DateFormat('dd MMM yyyy, hh:mm a').format(update.recordedAt);
+    final dateStr = DateFormat(
+      'dd MMM yyyy, hh:mm a',
+    ).format(update.recordedAt);
 
     return IntrinsicHeight(
       child: Row(
@@ -420,7 +552,10 @@ class _TimelineTile extends StatelessWidget {
                   Expanded(
                     flex: 1,
                     child: Center(
-                      child: Container(width: 2, color: ColorConstants.borderGrey),
+                      child: Container(
+                        width: 2,
+                        color: ColorConstants.borderGrey,
+                      ),
                     ),
                   ),
                 Container(
@@ -438,7 +573,10 @@ class _TimelineTile extends StatelessWidget {
                   Expanded(
                     flex: 3,
                     child: Center(
-                      child: Container(width: 2, color: ColorConstants.borderGrey),
+                      child: Container(
+                        width: 2,
+                        color: ColorConstants.borderGrey,
+                      ),
                     ),
                   ),
               ],
@@ -456,7 +594,9 @@ class _TimelineTile extends StatelessWidget {
                     : ColorConstants.lightCard,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: isFirst ? color.withValues(alpha: 0.3) : ColorConstants.borderGrey,
+                  color: isFirst
+                      ? color.withValues(alpha: 0.3)
+                      : ColorConstants.borderGrey,
                 ),
               ),
               child: Column(
@@ -469,7 +609,9 @@ class _TimelineTile extends StatelessWidget {
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: ColorConstants.forestGreen,
                             borderRadius: BorderRadius.circular(20),
@@ -499,8 +641,11 @@ class _TimelineTile extends StatelessWidget {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        const Icon(Icons.height_rounded,
-                            size: 14, color: ColorConstants.lightTextSecondary),
+                        const Icon(
+                          Icons.height_rounded,
+                          size: 14,
+                          color: ColorConstants.lightTextSecondary,
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           '${update.heightCm!.toStringAsFixed(1)} cm',
@@ -513,6 +658,11 @@ class _TimelineTile extends StatelessWidget {
                       ],
                     ),
                   ],
+                  if (update.recordedByName?.isNotEmpty == true)
+                    Text(
+                      'Recorded by ${update.recordedByName}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
                   if (update.notes != null && update.notes!.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text(
@@ -527,12 +677,11 @@ class _TimelineTile extends StatelessWidget {
                     const SizedBox(height: 8),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.file(
-                        File(update.photoPath!),
+                      child: _TreePhoto(
+                        key: ValueKey(update.photoPath),
+                        path: update.photoPath!,
                         height: 140,
-                        width: double.infinity,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
                       ),
                     ),
                   ],
@@ -594,8 +743,11 @@ class _Card extends StatelessWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow(
-      {required this.icon, required this.label, required this.value});
+  const _InfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
   final IconData icon;
   final String label;
   final String value;
@@ -629,6 +781,88 @@ class _InfoRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+ImageProvider _growthPhoto(String path) {
+  if (path.startsWith('/api/')) {
+    return NetworkImage(
+      Uri.parse(resolveApiBaseUrl()).resolve(path).toString(),
+    );
+  }
+  final scheme = Uri.tryParse(path)?.scheme;
+  if (kIsWeb || scheme == 'https' || scheme == 'http') {
+    return NetworkImage(path);
+  }
+  return FileImage(File(path));
+}
+
+class _TreePhoto extends StatefulWidget {
+  const _TreePhoto({
+    super.key,
+    required this.path,
+    this.height,
+    required this.fit,
+  });
+  final String path;
+  final double? height;
+  final BoxFit fit;
+
+  @override
+  State<_TreePhoto> createState() => _TreePhotoState();
+}
+
+class _TreePhotoState extends State<_TreePhoto> {
+  Future<List<int>>? _load;
+
+  @override
+  void initState() {
+    super.initState();
+    _prepare();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TreePhoto oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.path != oldWidget.path) _prepare();
+  }
+
+  void _prepare() {
+    final path = widget.path;
+    _load =
+        path.startsWith('/api/v1/media/plantation_photo/') ||
+            path.startsWith('/api/v1/media/growth_photo/')
+        ? getIt<FieldApiService>().loadPlantationPhoto(path)
+        : null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_load == null) {
+      return Image(
+        image: _growthPhoto(widget.path),
+        height: widget.height,
+        width: double.infinity,
+        fit: widget.fit,
+        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+      );
+    }
+    return FutureBuilder<List<int>>(
+      future: _load,
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        if (data == null || data.isEmpty) {
+          return SizedBox(height: widget.height);
+        }
+        return Image.memory(
+          Uint8List.fromList(data),
+          height: widget.height,
+          width: double.infinity,
+          fit: widget.fit,
+          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        );
+      },
     );
   }
 }

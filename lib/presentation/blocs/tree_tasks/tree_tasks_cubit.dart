@@ -64,6 +64,13 @@ class TreeTasksCubit extends Cubit<TreeTasksState> {
     }
   }
 
+  Future<TreeTaskModel> claimForSelf(String taskId) async {
+    final response = await _api.claimTreeTask(taskId);
+    final task = await _fieldSync.cacheTask(response);
+    await load();
+    return task;
+  }
+
   Future<TreeTaskModel?> assignWorker(
     String taskId,
     String workerId, {
@@ -72,28 +79,25 @@ class TreeTasksCubit extends Cubit<TreeTasksState> {
     AppLogger.request(
       '[TreeTasksCubit] assigning worker $workerId → task $taskId',
     );
+    TreeTaskModel? updated;
     try {
-      final updated = await _repo.assignWorker(
+      final response = await _api.updateTreeTask(
+        taskId,
+        workerId: workerId,
+        taskStatus: 'assigned',
+      );
+      updated = await _fieldSync.cacheTask(response);
+    } catch (e) {
+      if (!FieldApiService.isOfflineError(e)) rethrow;
+      AppLogger.error('[TreeTasksCubit] remote assign deferred: $e');
+      updated = await _repo.assignWorker(
         taskId,
         workerId,
         workerName: workerName,
       );
-      try {
-        await _api.updateTreeTask(
-          taskId,
-          workerId: workerId,
-          taskStatus: 'assigned',
-        );
-      } catch (e) {
-        AppLogger.error('[TreeTasksCubit] remote assign deferred: $e');
-      }
-      AppLogger.response('[TreeTasksCubit] assigned ok');
-      await load();
-      return updated;
-    } catch (e) {
-      AppLogger.error('[TreeTasksCubit] assignWorker error: $e');
-      return null;
     }
+    await load();
+    return updated;
   }
 
   Future<void> unassignWorker(String taskId) async {

@@ -8,11 +8,105 @@ import 'package:mess_app/presentation/blocs/tree_tasks/tree_tasks_state.dart';
 import 'package:mess_app/presentation/widgets/om_earth_ui.dart';
 
 import 'tree_task_detail_screen.dart';
+import 'corporate_plantation_screen.dart';
 
 /// Full task list — filter tabs (All / Unassigned / Assigned / Planted) and
 /// cards showing each admin-assigned planting task.
-class TreeTasksScreen extends StatelessWidget {
+class TreeTasksScreen extends StatefulWidget {
   const TreeTasksScreen({super.key});
+
+  @override
+  State<TreeTasksScreen> createState() => _TreeTasksScreenState();
+}
+
+class _TreeTasksScreenState extends State<TreeTasksScreen> {
+  Map<String, String> _filters = const {};
+
+  Map<String, String> _taskValues(TreeTaskModel task) => {
+    'Sponsorship': task.programName?.isNotEmpty == true
+        ? 'Corporate (legacy)'
+        : task.sponsorshipId?.isNotEmpty == true
+        ? 'Individual'
+        : 'Other field work',
+    'Region': task.regionName ?? '',
+    'Plot': task.plotName ?? task.plotId,
+    'Volunteer': task.workerName ?? '',
+  };
+
+  bool _matches(TreeTaskModel task) {
+    final values = _taskValues(task);
+    return _filters.entries.every(
+      (filter) => values[filter.key] == filter.value,
+    );
+  }
+
+  Future<void> _openFilters() async {
+    final current = context.read<TreeTasksCubit>().state;
+    if (current is! TreeTasksLoaded) return;
+    final options = <String, Set<String>>{
+      'Sponsorship': {'Individual', 'Corporate (legacy)', 'Other field work'},
+      'Region': {},
+      'Plot': {},
+      'Volunteer': {},
+    };
+    for (final task in current.tasks) {
+      for (final entry in _taskValues(task).entries) {
+        if (entry.value.isNotEmpty) options[entry.key]!.add(entry.value);
+      }
+    }
+    final draft = Map<String, String>.from(_filters);
+    final applied = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, redraw) {
+          return AlertDialog(
+            title: const Text('Filter planting tasks'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final entry in options.entries)
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: entry.value.contains(draft[entry.key])
+                          ? draft[entry.key]
+                          : '',
+                      decoration: InputDecoration(labelText: entry.key),
+                      items: [
+                        const DropdownMenuItem(value: '', child: Text('All')),
+                        for (final value in entry.value.toList()..sort())
+                          DropdownMenuItem(
+                            value: value,
+                            child: Text(value, overflow: TextOverflow.ellipsis),
+                          ),
+                      ],
+                      onChanged: (value) => redraw(() {
+                        if (value?.isNotEmpty == true) {
+                          draft[entry.key] = value!;
+                        } else {
+                          draft.remove(entry.key);
+                        }
+                      }),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, <String, String>{}),
+                child: const Text('Clear filters'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, draft),
+                child: const Text('Apply'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (applied != null && mounted) setState(() => _filters = applied);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,8 +122,38 @@ class TreeTasksScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _TasksAppBar(t: t),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.forest_outlined),
+                        label: Text(
+                          lang == AppLanguage.malayalam
+                              ? 'കോർപ്പറേറ്റ് നടീൽ ബാച്ചുകൾ'
+                              : 'Corporate planting batches',
+                        ),
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const CorporatePlantationScreen(),
+                          ),
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _openFilters,
+                        icon: const Icon(Icons.filter_list),
+                        label: Text(
+                          _filters.isEmpty
+                              ? 'Filter tasks'
+                              : 'Filters (${_filters.length})',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 _FilterTabs(t: t),
-                const Expanded(child: _TaskList()),
+                Expanded(child: _TaskList(matches: _matches)),
               ],
             ),
           ),
@@ -64,7 +188,10 @@ class _TasksAppBar extends StatelessWidget {
             builder: (context, state) {
               if (state is! TreeTasksLoaded) return const SizedBox.shrink();
               return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: ColorConstants.softGreen,
                   borderRadius: BorderRadius.circular(8),
@@ -87,7 +214,10 @@ class _TasksAppBar extends StatelessWidget {
                 return const SizedBox.shrink();
               }
               return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: ColorConstants.warningColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
@@ -189,7 +319,9 @@ class _FilterTabs extends StatelessWidget {
 // ── Task list ─────────────────────────────────────────────────────────────────
 
 class _TaskList extends StatelessWidget {
-  const _TaskList();
+  const _TaskList({required this.matches});
+
+  final bool Function(TreeTaskModel) matches;
 
   @override
   Widget build(BuildContext context) {
@@ -220,7 +352,7 @@ class _TaskList extends StatelessWidget {
             }
 
             if (state is TreeTasksLoaded) {
-              final items = state.filtered;
+              final items = state.filtered.where(matches).toList();
               if (items.isEmpty) return _EmptyTasks(t: t);
               return RefreshIndicator(
                 color: ColorConstants.forestGreen,
@@ -242,10 +374,8 @@ class _TaskList extends StatelessWidget {
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => TreeTaskDetailScreen(
-                            task: items[i],
-                            t: t,
-                          ),
+                          builder: (_) =>
+                              TreeTaskDetailScreen(task: items[i], t: t),
                         ),
                       ).then((_) => cubit.load()),
                     );
@@ -349,8 +479,9 @@ class _TaskCard extends StatelessWidget {
                     width: 42,
                     height: 42,
                     decoration: BoxDecoration(
-                      color: _statusColor(task.taskStatus)
-                          .withValues(alpha: 0.12),
+                      color: _statusColor(
+                        task.taskStatus,
+                      ).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
@@ -444,10 +575,13 @@ class _TaskCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
-                        color: ColorConstants.primaryOrange
-                            .withValues(alpha: 0.12),
+                        color: ColorConstants.primaryOrange.withValues(
+                          alpha: 0.12,
+                        ),
                         borderRadius: BorderRadius.circular(5),
                       ),
                       child: Text(
@@ -463,10 +597,13 @@ class _TaskCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
-                        color:
-                            ColorConstants.warningColor.withValues(alpha: 0.12),
+                        color: ColorConstants.warningColor.withValues(
+                          alpha: 0.12,
+                        ),
                         borderRadius: BorderRadius.circular(5),
                       ),
                       child: Text(
@@ -516,13 +653,11 @@ class _TaskCard extends StatelessWidget {
                   height: 36,
                   child: OutlinedButton.icon(
                     onPressed: onTap,
-                    icon: const Icon(Icons.person_add_rounded, size: 16),
-                    label: Text(t.assignWorker),
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                    label: Text(t.taskDetails),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: ColorConstants.forestGreen,
-                      side: const BorderSide(
-                        color: ColorConstants.forestGreen,
-                      ),
+                      side: const BorderSide(color: ColorConstants.forestGreen),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),

@@ -5,7 +5,7 @@ class DbConstants {
   DbConstants._();
 
   // ── DB meta ──────────────────────────────────────────────────────────────
-  static const int version = 11;
+  static const int version = 13;
   static const String dbName = 'omy_earth.db';
 
   // ── Table names ──────────────────────────────────────────────────────────
@@ -94,8 +94,12 @@ class DbConstants {
   static const String colTargetDate = 'target_date';
   // Sponsored backend tree id (from GET /field/sync treeId).
   static const String colPlotName = 'plot_name';
+  static const String colPlantedBy = 'planted_by';
+  static const String colPlantedById = 'planted_by_id';
   static const String colWorkerName = 'worker_name';
   static const String colRegionId = 'region_id';
+  static const String colSponsorshipCategory = 'sponsorship_category';
+  static const String colCorporateProgramId = 'corporate_program_id';
   static const String colRegionName = 'region_name';
   static const String colSponsorshipId = 'sponsorship_id';
   static const String colSponsorIntent = 'sponsor_intent';

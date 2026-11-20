@@ -39,28 +39,53 @@ class TreeRepository {
     return rows.map(TreeModel.fromMap).toList();
   }
 
+  /// Planted trees on the current account's plots and from its latest field sync.
+  Future<List<TreeModel>> getFieldInventory() async {
+    final db = await _database;
+    final rows = await db.rawQuery('''
+      SELECT t.*, p.${DbConstants.colName} AS current_plot_name,
+             p.${DbConstants.colRegionName} AS current_region_name,
+             w.${DbConstants.colName} AS current_worker_name
+      FROM ${DbConstants.tableTrees} t
+      LEFT JOIN ${DbConstants.tablePlots} p ON p.${DbConstants.colId} = t.${DbConstants.colPlotId}
+      LEFT JOIN ${DbConstants.tableWorkers} w ON w.${DbConstants.colId} = t.${DbConstants.colWorkerId}
+      WHERE t.${DbConstants.colPlantingDate} IS NOT NULL
+        AND (p.${DbConstants.colId} IS NOT NULL OR t.${DbConstants.colSyncedAt} IS NOT NULL)
+      ORDER BY COALESCE(p.${DbConstants.colRegionName}, t.${DbConstants.colRegionName}),
+               COALESCE(p.${DbConstants.colName}, t.${DbConstants.colPlotName}),
+               t.${DbConstants.colPlantingDate} DESC, t.${DbConstants.colId}
+    ''');
+    return rows.map((row) {
+      return TreeModel.fromMap({
+        ...row,
+        DbConstants.colPlotName:
+            row['current_plot_name'] ?? row[DbConstants.colPlotName],
+        DbConstants.colRegionName:
+            row['current_region_name'] ?? row[DbConstants.colRegionName],
+        DbConstants.colPlantedBy:
+            row[DbConstants.colPlantedBy] ?? row['current_worker_name'],
+      });
+    }).toList();
+  }
+
   /// Total count of live (not dead) trees stored locally.
   Future<int> getTreeCount() async {
     final db = await _database;
-    final result = await db.rawQuery(
-      '''
+    final result = await db.rawQuery('''
       SELECT COUNT(*) AS cnt FROM ${DbConstants.tableTrees}
        WHERE ${DbConstants.colIsDead} = 0
-      ''',
-    );
+      ''');
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
   /// Trees registered on today's date (local device time).
   Future<int> getRegisteredTodayCount() async {
     final db = await _database;
-    final result = await db.rawQuery(
-      '''
+    final result = await db.rawQuery('''
       SELECT COUNT(*) AS cnt FROM ${DbConstants.tableTrees}
-       WHERE DATE(${DbConstants.colCreatedAt} / 1000, 'unixepoch', 'localtime')
+       WHERE DATE(COALESCE(${DbConstants.colPlantingDate}, ${DbConstants.colCreatedAt}) / 1000, 'unixepoch', 'localtime')
              = DATE('now', 'localtime')
-      ''',
-    );
+      ''');
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
@@ -84,7 +109,7 @@ class TreeRepository {
       SELECT COUNT(*) AS cnt FROM ${DbConstants.tableTrees}
        WHERE ${DbConstants.colWorkerId} = ?
          AND ${DbConstants.colIsDead} = 0
-         AND DATE(${DbConstants.colCreatedAt} / 1000, 'unixepoch', 'localtime')
+         AND DATE(COALESCE(${DbConstants.colPlantingDate}, ${DbConstants.colCreatedAt}) / 1000, 'unixepoch', 'localtime')
              = DATE('now', 'localtime')
       ''',
       [workerId],
@@ -93,6 +118,77 @@ class TreeRepository {
   }
 
   // ── Writes ─────────────────────────────────────────────────────────────
+
+  /// Reconciles the server's planted inventory while retaining local-only trees.
+  Future<void> applyFieldTrees(List<TreeModel> trees) async {
+    final db = await _database;
+    final ids = trees.map((tree) => tree.id).toSet();
+    const inventoryColumns = [
+      DbConstants.colServerId,
+      DbConstants.colSponsorshipCategory,
+      DbConstants.colCorporateProgramId,
+      DbConstants.colSpecies,
+      DbConstants.colPlantingDate,
+      DbConstants.colPlotId,
+      DbConstants.colPlotName,
+      DbConstants.colRegionName,
+      DbConstants.colPlantedBy,
+      DbConstants.colPlantedById,
+      DbConstants.colLatitude,
+      DbConstants.colLongitude,
+      DbConstants.colNotes,
+      DbConstants.colWorkerId,
+      DbConstants.colIsDead,
+      DbConstants.colSyncStatus,
+      DbConstants.colCreatedAt,
+      DbConstants.colUpdatedAt,
+      DbConstants.colSyncedAt,
+    ];
+    await db.transaction((txn) async {
+      final cached = await txn.query(
+        DbConstants.tableTrees,
+        columns: [DbConstants.colId],
+        where:
+            "${DbConstants.colSyncStatus} = 'synced' AND ${DbConstants.colSyncedAt} IS NOT NULL",
+      );
+      // Keep a parent tree if an older app saved unsynced growth locally.
+      final pendingGrowth = await txn.query(
+        DbConstants.tableTreeGrowthUpdates,
+        columns: [DbConstants.colTreeId],
+        where: "${DbConstants.colSyncStatus} <> 'synced'",
+        distinct: true,
+      );
+      final localParents = pendingGrowth
+          .map((row) => row[DbConstants.colTreeId])
+          .toSet();
+      final batch = txn.batch();
+      for (final row in cached) {
+        final id = row[DbConstants.colId];
+        if (!ids.contains(id) && !localParents.contains(id)) {
+          batch.delete(
+            DbConstants.tableTrees,
+            where: '${DbConstants.colId} = ?',
+            whereArgs: [id],
+          );
+        }
+      }
+      for (final tree in trees) {
+        final values = tree.toMap();
+        batch.insert(
+          DbConstants.tableTrees,
+          values,
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        batch.update(
+          DbConstants.tableTrees,
+          {for (final column in inventoryColumns) column: values[column]},
+          where: '${DbConstants.colId} = ?',
+          whereArgs: [tree.id],
+        );
+      }
+      await batch.commit(noResult: true);
+    });
+  }
 
   /// Saves a new tree record. Throws if a record with [tree.id] already
   /// exists, preventing accidental duplicates.
