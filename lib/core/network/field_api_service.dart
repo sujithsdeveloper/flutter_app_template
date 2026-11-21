@@ -101,10 +101,17 @@ class FieldApiService {
     return (_unwrap(res) as List).cast<Map<String, dynamic>>();
   }
 
-  Future<Map<String, dynamic>> batchTrees(String batchId, int page) async {
+  Future<Map<String, dynamic>> batchTrees(
+    String batchId,
+    int page, {
+    String verification = '',
+  }) async {
     final res = await _dio.get(
       '$_plantationBatches/$batchId/trees',
-      queryParameters: {'page': page},
+      queryParameters: {
+        'page': page,
+        if (verification.isNotEmpty) 'verification': verification,
+      },
     );
     return _unwrap(res);
   }
@@ -132,6 +139,62 @@ class FieldApiService {
       '/api/v1/field/plantations/$programId/batches',
       data: fields,
     );
+  }
+
+  Future<String> saveRapidRun(
+    String id,
+    String batchId,
+    String startedAt, {
+    String? state,
+  }) async {
+    final response = await _dio.put(
+      '/api/v1/field/rapid-runs/$id',
+      data: {
+        'batchId': batchId,
+        'startedAt': startedAt,
+        if (state != null) 'state': state,
+      },
+    );
+    return _unwrap(response)['state'] as String;
+  }
+
+  Future<void> recordRapidTree(
+    String sessionId,
+    Map<String, dynamic> capture,
+  ) async {
+    await _dio.post('/api/v1/field/rapid-runs/$sessionId/trees', data: capture);
+  }
+
+  Future<void> uploadTreeEvidence(
+    String treeId,
+    String mediaId,
+    List<int> bytes, {
+    required String capturedAt,
+    required String kind,
+    String? notes,
+  }) async {
+    await _dio.post(
+      '/api/v1/field/trees/$treeId/evidence/$mediaId',
+      data: FormData.fromMap({
+        'kind': kind,
+        'capturedAt': capturedAt,
+        if (notes != null) 'notes': notes,
+        'file': MultipartFile.fromBytes(bytes, filename: 'capture.jpg'),
+      }),
+      options: Options(contentType: 'multipart/form-data'),
+    );
+  }
+
+  Future<void> verifyPlanting(String treeId, bool verified) async {
+    await _dio.put(
+      '/api/v1/field/trees/$treeId/verification',
+      data: {'verified': verified},
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> treeEvidence(String treeId) async {
+    final response = await _dio.get('/api/v1/field/trees/$treeId/evidence');
+    return (_unwrap(response) as List).cast<Map<String, dynamic>>();
   }
 
   Future<List<Map<String, dynamic>>> listPlantationBatches() async {
@@ -178,10 +241,17 @@ class FieldApiService {
     return _unwrap(response)['id'] as String;
   }
 
-  Future<void> attachPlantationPhoto(String sessionId, String photoUrl) async {
+  Future<void> attachPlantationPhoto(
+    String sessionId,
+    String photoUrl, {
+    String? capturedAt,
+  }) async {
     await _dio.put(
       '/api/v1/field/plantation-sessions/$sessionId/photo',
-      data: {'photoUrl': photoUrl},
+      data: {
+        'photoUrl': photoUrl,
+        if (capturedAt != null) 'capturedAt': capturedAt,
+      },
     );
   }
 
@@ -204,7 +274,8 @@ class FieldApiService {
 
   Future<List<int>> loadPlantationPhoto(String url) async {
     if (!url.startsWith('/api/v1/media/plantation_photo/') &&
-        !url.startsWith('/api/v1/media/growth_photo/')) {
+        !url.startsWith('/api/v1/media/growth_photo/') &&
+        !url.startsWith('/api/v1/media/tree_evidence/')) {
       throw StateError('Invalid photo address.');
     }
     final response = await _dio.get<List<int>>(
@@ -224,6 +295,17 @@ class FieldApiService {
   Future<Map<String, dynamic>> claimTreeTask(String id) async {
     final res = await _dio.post('${ApiUrls.treeTaskById(id)}/claim');
     return _unwrap(res);
+  }
+
+  Future<Map<String, dynamic>> recordPersonalPlantingSession(
+    String taskId,
+    Map<String, dynamic> payload,
+  ) async {
+    final result = await _dio.post(
+      '/api/v1/tree-tasks/$taskId/planting-sessions',
+      data: payload,
+    );
+    return Map<String, dynamic>.from(_unwrap(result) as Map);
   }
 
   Future<Map<String, dynamic>> updateTreeTask(

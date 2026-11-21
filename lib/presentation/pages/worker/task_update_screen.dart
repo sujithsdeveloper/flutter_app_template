@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:mess_app/core/auth/user_session.dart';
 import 'package:mess_app/core/constants/app_logger.dart';
 import 'package:mess_app/core/localization/app_language.dart';
 import 'package:mess_app/core/network/field_api_service.dart';
+import 'package:mess_app/core/network/field_sync_service.dart';
 import 'package:mess_app/core/service_locator/di.dart';
 import 'package:mess_app/core/utils/constants/color_constants.dart';
 import 'package:mess_app/data/models/sync_status.dart';
@@ -21,6 +23,7 @@ import 'package:mess_app/presentation/widgets/custom_textfield.dart';
 import 'package:mess_app/presentation/widgets/primary_button.dart';
 import 'package:mess_app/presentation/widgets/snackbar_helper.dart';
 import 'package:mess_app/presentation/widgets/tree_photo_capture.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 /// Allows the assigned planter to update a task:
@@ -45,6 +48,7 @@ class TaskUpdateScreen extends StatefulWidget {
 
 class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
   final _notesCtrl = TextEditingController();
+  final _quantityCtrl = TextEditingController();
   final _taskRepo = getIt<TreeTaskRepository>();
   final _growthRepo = getIt<TreeGrowthRepository>();
   final _treeRepo = getIt<TreeRepository>();
@@ -56,10 +60,13 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
   bool _saving = false;
 
   bool get _isFieldAdmin => widget.session.role.isAdminVolunteer;
+  String get _draftKey =>
+      'personal-planting.${widget.session.role.value}.${widget.session.userId}.${widget.task.id}';
 
   @override
   void dispose() {
     _notesCtrl.dispose();
+    _quantityCtrl.dispose();
     super.dispose();
   }
 
@@ -107,7 +114,106 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
 
   // ── Save actions ──────────────────────────────────────────────────────────
 
+  Future<void> _recordBatch(AppText t) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    var savedOnDevice = false;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final existing = preferences.getString(_draftKey);
+      Map<String, dynamic> draft;
+      if (existing != null) {
+        draft = jsonDecode(existing) as Map<String, dynamic>;
+        savedOnDevice = true;
+      } else {
+        final quantity = int.tryParse(_quantityCtrl.text.trim());
+        if (quantity == null ||
+            quantity < 1 ||
+            quantity > widget.task.batchRemaining) {
+          throw StateError(
+            'Enter 1–${widget.task.batchRemaining} planted trees.',
+          );
+        }
+        final notes = _notesCtrl.text.trim();
+        if (notes.length > 500) {
+          throw StateError('Keep session notes to 500 characters.');
+        }
+        final position = _position;
+        if (position == null) throw StateError(t.gpsRequired);
+        final image = _photoPath == null
+            ? null
+            : await XFile(_photoPath!).readAsBytes();
+        if (image != null && image.length > 2 * 1024 * 1024) {
+          throw StateError('Capture a photo smaller than 2 MB.');
+        }
+        draft = {
+          'payload': {
+            'submissionKey': const Uuid().v4(),
+            'quantity': quantity,
+            'lat': position.latitude,
+            'lng': position.longitude,
+            'notes': notes,
+          },
+          if (image != null) 'photo': base64Encode(image),
+        };
+        savedOnDevice = await preferences.setString(
+          _draftKey,
+          jsonEncode(draft),
+        );
+        if (!savedOnDevice) {
+          throw StateError(
+            'Could not save the planting session on this device.',
+          );
+        }
+      }
+      final payload = draft['payload'] as Map<String, dynamic>;
+      final image = draft['photo'] as String?;
+      if (image != null && payload['photoUrl'] == null) {
+        payload['photoUrl'] = await _fieldApi.uploadPlantationPhoto(
+          base64Decode(image),
+        );
+        draft.remove('photo');
+        await preferences.setString(_draftKey, jsonEncode(draft));
+      }
+      final row = await _fieldApi.recordPersonalPlantingSession(
+        widget.task.id,
+        payload,
+      );
+      await preferences.remove(_draftKey);
+      savedOnDevice = false;
+      final sync = getIt<FieldSyncService>();
+      await sync.cacheTask(row);
+      try {
+        await sync.pullAndApply();
+      } catch (error) {
+        AppLogger.error(
+          '[TaskUpdateScreen] batch recorded, refresh deferred: $error',
+        );
+      }
+      if (!mounted) return;
+      SnackbarHelper.showSucces(
+        context: context,
+        message: 'Planting session recorded.',
+      );
+      Navigator.pop(context, true);
+    } catch (error) {
+      if (!mounted) return;
+      final message = error is StateError
+          ? error.message
+          : FieldApiService.messageOf(error);
+      SnackbarHelper.showError(
+        context: context,
+        message: savedOnDevice
+            ? 'Session saved on this device. Tap Record session to retry. $message'
+            : message,
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _markAsPlanted(AppText t) async {
+    if (widget.task.isPlantingBatch) return _recordBatch(t);
     if (_position == null) {
       SnackbarHelper.showError(context: context, message: t.gpsRequired);
       return;
@@ -285,7 +391,7 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
 
     setState(() => _saving = true);
     try {
-      if (_isFieldAdmin) {
+      if (_isFieldAdmin || widget.task.isPlantingBatch) {
         await _fieldApi.updateTreeTask(
           widget.task.id,
           taskStatus: 'cancelled',
@@ -295,7 +401,9 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
       await _taskRepo.cancelTask(
         widget.task.id,
         reason: reason,
-        syncStatus: _isFieldAdmin ? SyncStatus.synced : SyncStatus.pending,
+        syncStatus: _isFieldAdmin || widget.task.isPlantingBatch
+            ? SyncStatus.synced
+            : SyncStatus.pending,
       );
       if (!mounted) return;
       SnackbarHelper.showSucces(context: context, message: t.taskCancelled);
@@ -351,6 +459,23 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
                     // ── Task info ─────────────────────────────────────
                     _buildTaskInfoCard(t),
                     const SizedBox(height: 16),
+
+                    if (widget.task.isPlantingBatch) ...[
+                      Text(
+                        '${widget.task.batchPlanted} of ${widget.task.batchQuantity} trees planted',
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _quantityCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Trees planted in this session',
+                          helperText: '${widget.task.batchRemaining} remaining',
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
 
                     // ── GPS section ───────────────────────────────────
                     _buildGpsSection(t),
@@ -753,7 +878,9 @@ class _TaskUpdateScreenState extends State<TaskUpdateScreen> {
           Expanded(
             flex: 2,
             child: PrimaryButton(
-              label: t.markAsPlanted,
+              label: widget.task.isPlantingBatch
+                  ? 'Record session'
+                  : t.markAsPlanted,
               icon: Icons.check_circle_outline_rounded,
               isLoading: _saving,
               onPressed: _saving ? null : () => _markAsPlanted(t),

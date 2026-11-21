@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:uuid/uuid.dart';
+import 'package:mess_app/presentation/widgets/tree_photo_capture.dart';
 import 'package:mess_app/core/constants/app_logger.dart';
 import 'package:mess_app/core/localization/app_language.dart';
 import 'package:mess_app/core/network/api_client.dart';
@@ -42,6 +45,9 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
   List<TreeGrowthUpdateModel> _updates = [];
   bool _loading = true;
   Map<String, dynamic>? _details;
+  List<Map<String, dynamic>> _evidence = [];
+  bool _evidenceBusy = false;
+  String get _treeId => widget.tree.serverId ?? widget.tree.id;
 
   final _repo = getIt<TreeGrowthRepository>();
 
@@ -87,12 +93,63 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
         );
       }
     }
+    var evidence = _evidence;
+    if (widget.syncGrowth && details != null) {
+      try {
+        evidence = await getIt<FieldApiService>().treeEvidence(_treeId);
+      } catch (error) {
+        AppLogger.error(
+          '[WorkerTreeDetailScreen] evidence unavailable: $error',
+        );
+      }
+    }
     if (mounted) {
       setState(() {
         _updates = updates;
         _details = details;
+        _evidence = evidence;
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _verify(bool verified) async {
+    await _evidenceAction(
+      () => getIt<FieldApiService>().verifyPlanting(_treeId, verified),
+    );
+  }
+
+  Future<void> _takeEvidence(String kind) async {
+    final path = await captureTreePhoto(
+      context,
+      AppText(LanguageController.language.value),
+    );
+    if (path == null || !mounted) return;
+    await _evidenceAction(() async {
+      final photo = await XFile(path).readAsBytes();
+      await getIt<FieldApiService>().uploadTreeEvidence(
+        _treeId,
+        const Uuid().v4(),
+        photo,
+        capturedAt: DateTime.now().toUtc().toIso8601String(),
+        kind: kind,
+      );
+    });
+  }
+
+  Future<void> _evidenceAction(Future<void> Function() action) async {
+    setState(() => _evidenceBusy = true);
+    try {
+      await action();
+      if (mounted) await _load();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(FieldApiService.messageOf(error))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _evidenceBusy = false);
     }
   }
 
@@ -261,6 +318,20 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
     final category = _details?['category'] ?? widget.tree.sponsorshipCategory;
     final status = _details?['status'] as String?;
     final initial = _details?['initialPhoto'] as String?;
+    final shared = _details?['sharedSessionPhoto'] as String?;
+    final capturedAt = DateTime.tryParse(
+      _details?['capturedAt'] as String? ?? '',
+    )?.toLocal();
+
+    final individual = _details?['individualCapture'] == true;
+    final verified = _details?['verified'] == true;
+    final additional = _evidence.where(
+      (photo) =>
+          photo['kind'] == 'survival' ||
+          photo['kind'] == 'supporting' ||
+          (photo['kind'] == 'growth' &&
+              !_updates.any((update) => update.photoPath == photo['url'])),
+    );
     final latest = _updates.firstOrNull;
     return _Card(
       child: Column(
@@ -304,6 +375,12 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
               label: t.plantedOn,
               value: DateFormat.yMMMd().format(planted),
             ),
+          if (capturedAt != null)
+            _InfoRow(
+              icon: Icons.schedule_outlined,
+              label: 'Captured',
+              value: DateFormat.yMMMd().add_jm().format(capturedAt),
+            ),
           _InfoRow(
             icon: Icons.health_and_safety_outlined,
             label: 'Survival status',
@@ -324,10 +401,62 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
               label: 'Latest update by',
               value: latest!.recordedByName!,
             ),
+          if (individual)
+            _InfoRow(
+              icon: Icons.verified_outlined,
+              label: 'Planting verification',
+              value: verified
+                  ? 'Verified'
+                  : initial?.isNotEmpty == true
+                  ? 'Awaiting review'
+                  : 'Waiting for individual photo',
+            ),
+          if (_details?['canVerify'] == true &&
+              (verified || initial?.isNotEmpty == true))
+            OutlinedButton(
+              onPressed: _evidenceBusy ? null : () => _verify(!verified),
+              child: Text(verified ? 'Undo verification' : 'Verify planting'),
+            ),
+          if (_details?['canUpdate'] == true && _details?['canVerify'] == true)
+            PopupMenuButton<String>(
+              enabled: !_evidenceBusy,
+              onSelected: _takeEvidence,
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'survival',
+                  child: Text('Take survival photo'),
+                ),
+                PopupMenuItem(
+                  value: 'supporting',
+                  child: Text('Take supporting photo'),
+                ),
+              ],
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text('Add evidence photo'),
+              ),
+            ),
           if (initial != null && initial.isNotEmpty) ...[
             const Text('Initial planting photo'),
             const SizedBox(height: 6),
             _TreePhoto(path: initial, height: 120, fit: BoxFit.cover),
+          ],
+          if (shared?.isNotEmpty == true) ...[
+            const Text('Shared session photo'),
+            _TreePhoto(path: shared!, height: 120, fit: BoxFit.cover),
+          ],
+          for (final photo in additional) ...[
+            Text(switch (photo['kind']) {
+              'survival' => 'Survival evidence',
+              'supporting' => 'Supporting evidence',
+              _ => 'Growth evidence',
+            }),
+            _TreePhoto(
+              key: ValueKey(photo['id']),
+              path: photo['url'] as String,
+              height: 120,
+              fit: BoxFit.cover,
+            ),
           ],
           _InfoRow(
             icon: Icons.location_on_rounded,
@@ -347,7 +476,9 @@ class _WorkerTreeDetailScreenState extends State<WorkerTreeDetailScreen> {
           _InfoRow(
             icon: Icons.my_location_rounded,
             label: 'GPS',
-            value: '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+            value: _details?['hasGps'] == false
+                ? 'Unavailable'
+                : '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
           ),
           if (daysGrowing != null)
             _InfoRow(
@@ -832,7 +963,8 @@ class _TreePhotoState extends State<_TreePhoto> {
     final path = widget.path;
     _load =
         path.startsWith('/api/v1/media/plantation_photo/') ||
-            path.startsWith('/api/v1/media/growth_photo/')
+            path.startsWith('/api/v1/media/growth_photo/') ||
+            path.startsWith('/api/v1/media/tree_evidence/')
         ? getIt<FieldApiService>().loadPlantationPhoto(path)
         : null;
   }

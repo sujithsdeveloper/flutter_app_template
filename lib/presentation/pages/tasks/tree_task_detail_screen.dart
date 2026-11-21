@@ -294,7 +294,8 @@ class _TreeTaskDetailScreenState extends State<TreeTaskDetailScreen> {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: ColorConstants.primaryOrange,
                       side: const BorderSide(
-                          color: ColorConstants.primaryOrange),
+                        color: ColorConstants.primaryOrange,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),
@@ -356,12 +357,20 @@ class _TreeTaskDetailScreenState extends State<TreeTaskDetailScreen> {
             const SizedBox(height: 16),
           ],
 
+          if (task.isPlantingBatch) ...[
+            Text(
+              '${task.batchPlanted} of ${task.batchQuantity} trees planted',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: task.batchPlanted / task.batchQuantity,
+            ),
+            const SizedBox(height: 16),
+          ],
+
           // ── Assignment ──────────────────────────────────────────────
-          _AssignmentCard(
-            task: task,
-            t: t,
-            isMine: isMine,
-          ),
+          _AssignmentCard(task: task, t: t, isMine: isMine),
           const SizedBox(height: 24),
           if (canPlant) ...[
             PrimaryButton(
@@ -380,6 +389,7 @@ class _TreeTaskDetailScreenState extends State<TreeTaskDetailScreen> {
             )
           else if (session != null &&
               isMine &&
+              !task.isPlantingBatch &&
               task.taskStatus == TaskStatus.planted)
             PrimaryButton(
               label: t.treeDetails,
@@ -393,8 +403,18 @@ class _TreeTaskDetailScreenState extends State<TreeTaskDetailScreen> {
 
   String _formatDate(DateTime dt) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
   }

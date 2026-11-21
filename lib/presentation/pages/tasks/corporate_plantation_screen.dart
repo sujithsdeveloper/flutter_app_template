@@ -1,3 +1,4 @@
+import 'rapid_tree_capture_screen.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -20,6 +21,14 @@ import 'package:uuid/uuid.dart';
 
 typedef _Row = Map<String, dynamic>;
 const _datePattern = 'yyyy-MM-dd';
+
+String? _reviewStatus(Map<String, dynamic> batch) =>
+    switch (batch['reviewStatus']) {
+      'pending' => 'Submitted for verification',
+      'verified' => 'Verified',
+      'rejected' => 'Review rejected',
+      _ => null,
+    };
 
 class CorporatePlantationScreen extends StatefulWidget {
   const CorporatePlantationScreen({super.key, this.allocationId});
@@ -57,6 +66,18 @@ class _CorporatePlantationScreenState extends State<CorporatePlantationScreen> {
       ? []
       : (jsonDecode(data) as List).cast<Map<String, dynamic>>();
 
+  List<_Row> _queuedPhotos(_Row draft) {
+    final photos = draft['photos'] as List?;
+    if (photos != null) return photos.cast<_Row>().toList();
+    final legacy = draft['photo'] as String?;
+    if (legacy == null || (draft['payload'] as Map)['photoUrl'] != null) {
+      return [];
+    }
+    return [
+      {'image': legacy, 'url': draft['uploadedPhotoUrl']},
+    ];
+  }
+
   void _countPending(SharedPreferences preferences, String prefix) {
     if (!mounted) return;
     var sessions = 0;
@@ -69,7 +90,7 @@ class _CorporatePlantationScreenState extends State<CorporatePlantationScreen> {
       if (draft['sessionId'] == null) {
         sessions++;
       } else {
-        photos++;
+        photos += _queuedPhotos(draft).length;
       }
     }
     setState(() {
@@ -126,8 +147,26 @@ class _CorporatePlantationScreenState extends State<CorporatePlantationScreen> {
         final draft = jsonDecode(stored) as _Row;
         final payload = Map<String, dynamic>.from(draft['payload'] as Map);
         var sessionId = draft['sessionId'] as String?;
+        final photos = _queuedPhotos(draft);
         try {
+          Future<String> upload(_Row photo) async {
+            final existing = photo['url'] as String?;
+            if (existing != null) return existing;
+            final url = await _api.uploadPlantationPhoto(
+              base64Decode(photo['image'] as String),
+            );
+            if (!preferences.containsKey(key)) return url;
+            photo['url'] = url;
+            draft['photos'] = photos;
+            await preferences.setString(key, jsonEncode(draft));
+            return url;
+          }
+
           if (sessionId == null) {
+            if (draft['requirePhoto'] == true && photos.isNotEmpty) {
+              payload['photoUrl'] = await upload(photos.first);
+              if (!preferences.containsKey(key)) continue;
+            }
             sessionId = await _api.recordPlantationSession(
               draft['batchId'] as String,
               payload,
@@ -135,18 +174,22 @@ class _CorporatePlantationScreenState extends State<CorporatePlantationScreen> {
             saved = true;
             if (!preferences.containsKey(key)) continue;
             draft['sessionId'] = sessionId;
+            draft['photos'] = photos;
             await preferences.setString(key, jsonEncode(draft));
           }
-          final photo = draft['photo'] as String?;
-          if (photo != null && payload['photoUrl'] == null) {
-            var photoUrl = draft['uploadedPhotoUrl'] as String?;
-            if (photoUrl == null) {
-              photoUrl = await _api.uploadPlantationPhoto(base64Decode(photo));
-              if (!preferences.containsKey(key)) continue;
-              draft['uploadedPhotoUrl'] = photoUrl;
-              await preferences.setString(key, jsonEncode(draft));
-            }
-            await _api.attachPlantationPhoto(sessionId, photoUrl);
+          while (photos.isNotEmpty && preferences.containsKey(key)) {
+            final photo = photos.first;
+            final url = await upload(photo);
+            if (!preferences.containsKey(key)) break;
+            await _api.attachPlantationPhoto(
+              sessionId,
+              url,
+              capturedAt: photo['capturedAt'] as String?,
+            );
+            if (!preferences.containsKey(key)) break;
+            photos.removeAt(0);
+            draft['photos'] = photos;
+            await preferences.setString(key, jsonEncode(draft));
           }
           await preferences.remove(key);
         } catch (error) {
@@ -286,7 +329,8 @@ class _CorporatePlantationScreenState extends State<CorporatePlantationScreen> {
                 title: Text(batch['programName'] as String),
                 subtitle: Text(
                   '${batch['companyName']} · ${batch['plot']} · ${batch['region']}\n'
-                  '${batch['planted']} of ${batch['quantity']} planted',
+                  '${batch['planted']} of ${batch['quantity']} planted'
+                  '${_reviewStatus(batch) == null ? '' : '\n${_reviewStatus(batch)}'}',
                 ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => _open(batch),
@@ -423,7 +467,10 @@ class _BatchDetailState extends State<_BatchDetail> {
     final record = await showModalBottomSheet<_Row>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _PlantingForm(remaining: _remaining),
+      builder: (_) => _PlantingForm(
+        remaining: _remaining,
+        requirePhoto: _batch['requireSessionPhoto'] == true,
+      ),
     );
     if (record == null || !mounted) return;
     setState(() => _busy = true);
@@ -483,11 +530,14 @@ class _BatchDetailState extends State<_BatchDetail> {
           Text('Field admin · ${_batch['fieldAdmin']}'),
           Text(
             'Status · ${_remaining == 0
-                ? 'Planting completed'
+                ? _reviewStatus(_batch) ?? 'Planting completed'
                 : _open
                 ? 'Open for planting'
                 : 'Closed'}',
           ),
+          if (_batch['reviewStatus'] == 'rejected' &&
+              _batch['reviewNote'] is String)
+            Text(_batch['reviewNote'] as String),
           if ((_batch['targetDate'] as String).isNotEmpty)
             Text('Target date · ${_batch['targetDate']}'),
           if (_batch['instructions'] != null)
@@ -524,11 +574,33 @@ class _BatchDetailState extends State<_BatchDetail> {
                       if (value != null) unawaited(_assign(value));
                     },
             ),
+          if ((_batch['verified'] as int? ?? 0) > 0 ||
+              (_batch['verificationPending'] as int? ?? 0) > 0)
+            Text(
+              "${_batch['verified']} verified · ${_batch['verificationPending']} pending review",
+            ),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(_error!),
             ),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.camera_alt_outlined),
+            label: const Text('Rapid tree capture'),
+            onPressed: _busy
+                ? null
+                : () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => RapidTreeCaptureScreen(
+                          batch: _batch,
+                          account: widget.prefix,
+                        ),
+                      ),
+                    );
+                    if (mounted) await _load();
+                  },
+          ),
           if (_open &&
               drafts.values.every((draft) => draft['sessionId'] != null))
             FilledButton.icon(
@@ -574,10 +646,17 @@ class _BatchDetailState extends State<_BatchDetail> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('${session['planter']} · ${session['species']}'),
-                    Text('GPS ${session['lat']}, ${session['lng']}'),
+                    if (session['lat'] != null && session['lng'] != null)
+                      Text('GPS ${session['lat']}, ${session['lng']}'),
                     if (session['notes'] != null)
                       Text(session['notes'] as String),
-                    if (session['photoUrl'] != null)
+                    for (final photo in (session['photos'] as List? ?? []))
+                      _SessionPhoto(
+                        key: ValueKey(photo['url']),
+                        path: photo['url'] as String,
+                      ),
+                    if (session['photos'] == null &&
+                        session['photoUrl'] != null)
                       _SessionPhoto(path: session['photoUrl'] as String),
                   ],
                 ),
@@ -590,7 +669,7 @@ class _BatchDetailState extends State<_BatchDetail> {
 }
 
 class _SessionPhoto extends StatefulWidget {
-  const _SessionPhoto({required this.path});
+  const _SessionPhoto({super.key, required this.path});
 
   final String path;
 
@@ -626,8 +705,9 @@ class _SessionPhotoState extends State<_SessionPhoto> {
 }
 
 class _PlantingForm extends StatefulWidget {
-  const _PlantingForm({required this.remaining});
+  const _PlantingForm({required this.remaining, required this.requirePhoto});
   final int remaining;
+  final bool requirePhoto;
 
   @override
   State<_PlantingForm> createState() => _PlantingFormState();
@@ -639,7 +719,7 @@ class _PlantingFormState extends State<_PlantingForm> {
   final _notes = TextEditingController();
   DateTime _date = DateTime.now();
   Position? _position;
-  String? _photo;
+  final List<_Row> _photos = [];
   String? _error;
   bool _locating = false;
 
@@ -697,7 +777,10 @@ class _PlantingFormState extends State<_PlantingForm> {
         return;
       }
       setState(() {
-        _photo = base64Encode(bytes);
+        _photos.add({
+          'image': base64Encode(bytes),
+          'capturedAt': DateTime.now().toUtc().toIso8601String(),
+        });
         _error = null;
       });
     } catch (_) {
@@ -713,6 +796,10 @@ class _PlantingFormState extends State<_PlantingForm> {
       setState(() => _error = 'Capture the planting location first.');
       return;
     }
+    if (widget.requirePhoto && _photos.isEmpty) {
+      setState(() => _error = 'Take at least one planting session photo.');
+      return;
+    }
     Navigator.of(context).pop<_Row>({
       'payload': <String, dynamic>{
         'submissionKey': const Uuid().v4(),
@@ -722,7 +809,8 @@ class _PlantingFormState extends State<_PlantingForm> {
         'lng': _position!.longitude,
         'notes': _notes.text.trim(),
       },
-      if (_photo != null) 'photo': _photo,
+      'photos': _photos,
+      'requirePhoto': widget.requirePhoto,
     });
   }
 
@@ -745,7 +833,11 @@ class _PlantingFormState extends State<_PlantingForm> {
               'Add planting session',
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            const Text('Record one tree to capture its own GPS and photo.'),
+            Text(
+              widget.requirePhoto
+                  ? 'Take at least one photo of the planting session.'
+                  : 'You can add photos of this planting session.',
+            ),
             TextFormField(
               controller: _quantity,
               keyboardType: TextInputType.number,
@@ -790,13 +882,33 @@ class _PlantingFormState extends State<_PlantingForm> {
               ),
             ),
             OutlinedButton.icon(
-              onPressed: _capture,
+              onPressed: _photos.length >= 5 ? null : _capture,
               icon: const Icon(Icons.camera_alt_outlined),
-              label: Text(
-                _photo == null ? 'Take photo (optional)' : 'Retake photo',
-              ),
+              label: Text('Take session photo (${_photos.length}/5)'),
             ),
-            if (_photo != null) Image.memory(base64Decode(_photo!), height: 72),
+            if (_photos.isNotEmpty)
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final photo in _photos)
+                    Stack(
+                      children: [
+                        Image.memory(
+                          base64Decode(photo['image'] as String),
+                          width: 76,
+                          height: 76,
+                          fit: BoxFit.cover,
+                        ),
+                        IconButton(
+                          tooltip: 'Remove session photo',
+                          icon: const Icon(Icons.cancel),
+                          onPressed: () =>
+                              setState(() => _photos.remove(photo)),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
             if (_error != null)
               Text(
                 _error!,

@@ -42,7 +42,11 @@ class _CampaignApi extends Fake implements FieldApiService {
   ];
 
   @override
-  Future<Map<String, dynamic>> batchTrees(String batchId, int page) async {
+  Future<Map<String, dynamic>> batchTrees(
+    String batchId,
+    int page, {
+    String verification = '',
+  }) async {
     expect(batchId, 'batch');
     pages.add(page);
     return {

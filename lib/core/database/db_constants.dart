@@ -5,7 +5,7 @@ class DbConstants {
   DbConstants._();
 
   // ── DB meta ──────────────────────────────────────────────────────────────
-  static const int version = 13;
+  static const int version = 16;
   static const String dbName = 'omy_earth.db';
 
   // ── Table names ──────────────────────────────────────────────────────────
@@ -89,6 +89,9 @@ class DbConstants {
   static const String colRecordedAt = 'recorded_at';
 
   // ── tree_tasks columns ────────────────────────────────────────────────────
+  static const String colBatchQuantity = 'batch_quantity';
+  static const String colBatchPlanted = 'batch_planted';
+  static const String colBatchReviewStatus = 'batch_review_status';
   static const String colTaskStatus = 'task_status';
   static const String colAdminNotes = 'admin_notes';
   static const String colTargetDate = 'target_date';

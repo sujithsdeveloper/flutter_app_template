@@ -204,6 +204,9 @@ class FieldSyncService {
       plotName: (plotNameRaw == null || plotNameRaw.isEmpty)
           ? null
           : plotNameRaw,
+      batchQuantity: (m['batchQuantity'] as num?)?.toInt() ?? 0,
+      batchPlanted: (m['batchPlanted'] as num?)?.toInt() ?? 0,
+      batchReviewStatus: (m['batchReviewStatus'] as String?) ?? '',
       species: (m['species'] ?? '').toString(),
       latitude: (m['lat'] as num?)?.toDouble() ?? 0,
       longitude: (m['lng'] as num?)?.toDouble() ?? 0,

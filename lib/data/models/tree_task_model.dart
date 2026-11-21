@@ -61,6 +61,9 @@ class TreeTaskModel {
     this.regionId,
     this.regionName,
     this.sponsorshipId,
+    this.batchQuantity = 0,
+    this.batchPlanted = 0,
+    this.batchReviewStatus = '',
     this.taskStatus = TaskStatus.pending,
     this.syncStatus = SyncStatus.synced,
     this.retryCount = 0,
@@ -115,6 +118,17 @@ class TreeTaskModel {
       (workerId == null || workerId!.isEmpty) &&
       taskStatus != TaskStatus.pending;
 
+  final int batchQuantity;
+  final int batchPlanted;
+  final String batchReviewStatus;
+  String get batchReviewLabel => switch (batchReviewStatus) {
+    'pending' => 'Submitted for verification',
+    'verified' => 'Verified',
+    'rejected' => 'Review rejected',
+    _ => '',
+  };
+  bool get isPlantingBatch => batchQuantity > 0;
+  int get batchRemaining => batchQuantity - batchPlanted;
   final TaskStatus taskStatus;
   final SyncStatus syncStatus;
   final int retryCount;
@@ -208,6 +222,10 @@ class TreeTaskModel {
       regionId: map[DbConstants.colRegionId] as String?,
       regionName: map[DbConstants.colRegionName] as String?,
       sponsorshipId: map[DbConstants.colSponsorshipId] as String?,
+      batchQuantity: (map[DbConstants.colBatchQuantity] as int?) ?? 0,
+      batchPlanted: (map[DbConstants.colBatchPlanted] as int?) ?? 0,
+      batchReviewStatus:
+          (map[DbConstants.colBatchReviewStatus] as String?) ?? '',
       taskStatus: TaskStatus.fromValue(
         (map[DbConstants.colTaskStatus] as String?) ?? 'pending',
       ),
@@ -252,6 +270,9 @@ class TreeTaskModel {
       DbConstants.colRegionId: regionId,
       DbConstants.colRegionName: regionName,
       DbConstants.colSponsorshipId: sponsorshipId,
+      DbConstants.colBatchQuantity: batchQuantity,
+      DbConstants.colBatchPlanted: batchPlanted,
+      DbConstants.colBatchReviewStatus: batchReviewStatus,
       DbConstants.colTaskStatus: taskStatus.value,
       DbConstants.colSyncStatus: syncStatus.value,
       DbConstants.colRetryCount: retryCount,
@@ -301,6 +322,9 @@ class TreeTaskModel {
       regionId: regionId ?? this.regionId,
       regionName: regionName ?? this.regionName,
       sponsorshipId: sponsorshipId,
+      batchQuantity: batchQuantity,
+      batchPlanted: batchPlanted,
+      batchReviewStatus: batchReviewStatus,
       taskStatus: taskStatus ?? this.taskStatus,
       syncStatus: syncStatus ?? this.syncStatus,
       retryCount: retryCount ?? this.retryCount,

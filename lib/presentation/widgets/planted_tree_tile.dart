@@ -7,10 +7,16 @@ import 'package:mess_app/data/models/tree_model.dart';
 import 'package:mess_app/presentation/pages/worker/worker_tree_detail_screen.dart';
 
 class PlantedTreeTile extends StatelessWidget {
-  const PlantedTreeTile({super.key, required this.tree, required this.t});
+  const PlantedTreeTile({
+    super.key,
+    required this.tree,
+    required this.t,
+    this.verification,
+  });
 
   final TreeModel tree;
   final AppText t;
+  final String? verification;
 
   Future<void> _openTree(BuildContext context) async {
     final session = await getIt<SessionManager>().getSession();
@@ -40,6 +46,8 @@ class PlantedTreeTile extends StatelessWidget {
         subtitle: Text(
           [
             '${t.plantedBy}: ${tree.plantedBy ?? t.unknownPlanter}',
+            if (verification == 'verified') 'Planting verified',
+            if (verification == 'pending') 'Planting needs review',
             if (plantingDate != null)
               '${t.plantedOn}: ${DateFormat.yMMMd().format(plantingDate)}',
           ].join('\n'),

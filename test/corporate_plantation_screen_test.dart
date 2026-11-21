@@ -16,6 +16,7 @@ class _PlantationApi implements FieldApiService {
   var photoStorageOnline = false;
   final attachments = <String>[];
   final recorded = <String>[];
+  var successfulUploads = 0;
 
   void _requireConnection() {
     if (!online) {
@@ -57,11 +58,16 @@ class _PlantationApi implements FieldApiService {
         response: Response(requestOptions: options, statusCode: 503),
       );
     }
-    return '/api/v1/media/plantation_photo/photo';
+    successfulUploads++;
+    return '/api/v1/media/plantation_photo/photo-$successfulUploads';
   }
 
   @override
-  Future<void> attachPlantationPhoto(String sessionId, String photoUrl) async {
+  Future<void> attachPlantationPhoto(
+    String sessionId,
+    String photoUrl, {
+    String? capturedAt,
+  }) async {
     expect(sessionId, 'saved-session');
     attachments.add(photoUrl);
   }
@@ -92,70 +98,95 @@ const _batch = {
 };
 
 void main() {
-  testWidgets(
-    'planting syncs after reconnect and a failed photo retries separately',
-    (tester) async {
-      const prefix = 'corporate-plantation.worker.worker-1.';
-      const draftKey = '${prefix}draft.1.retry-id';
-      const otherAccountDraft =
-          'corporate-plantation.worker.worker-2.draft.1.other';
-      final draft = jsonEncode({
-        'batchId': 'batch-1',
-        'payload': {'submissionKey': 'retry-id', 'quantity': 5},
-        'photo': base64Encode([1, 2, 3]),
-      });
-      SharedPreferences.setMockInitialValues({
-        'session_role': 'worker',
-        'session_user_id': 'worker-1',
-        'session_user_name': 'Planter',
-        '${prefix}batches': jsonEncode([_batch]),
-        draftKey: draft,
-        otherAccountDraft: draft,
-      });
-      final api = _PlantationApi();
-      final sync = _FieldSync();
-      getIt.registerSingleton<SessionManager>(SessionManager());
-      getIt.registerSingleton<FieldApiService>(api);
-      getIt.registerSingleton<FieldSyncService>(sync);
-      addTearDown(() => getIt.reset());
-      final messenger = tester.binding.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(
-        const MethodChannel('dev.fluttercommunity.plus/connectivity_status'),
-        (_) async => null,
-      );
+  for (final multiplePhotos in [false, true]) {
+    testWidgets(
+      multiplePhotos
+          ? 'all session photos retry without recording the planting twice'
+          : 'planting syncs after reconnect and a failed photo retries separately',
+      (tester) async {
+        const prefix = 'corporate-plantation.worker.worker-1.';
+        const draftKey = '${prefix}draft.1.retry-id';
+        const otherAccountDraft =
+            'corporate-plantation.worker.worker-2.draft.1.other';
+        final draft = jsonEncode({
+          'batchId': 'batch-1',
+          'payload': {'submissionKey': 'retry-id', 'quantity': 5},
+          if (multiplePhotos)
+            'photos': [
+              {
+                'image': base64Encode([1, 2, 3]),
+                'capturedAt': '2026-11-21T01:00:00Z',
+              },
+              {
+                'image': base64Encode([1, 2, 3]),
+                'capturedAt': '2026-11-21T01:01:00Z',
+              },
+            ]
+          else
+            'photo': base64Encode([1, 2, 3]),
+        });
+        SharedPreferences.setMockInitialValues({
+          'session_role': 'worker',
+          'session_user_id': 'worker-1',
+          'session_user_name': 'Planter',
+          '${prefix}batches': jsonEncode([_batch]),
+          draftKey: draft,
+          otherAccountDraft: draft,
+        });
+        final api = _PlantationApi();
+        final sync = _FieldSync();
+        getIt.registerSingleton<SessionManager>(SessionManager());
+        getIt.registerSingleton<FieldApiService>(api);
+        getIt.registerSingleton<FieldSyncService>(sync);
+        addTearDown(() => getIt.reset());
+        final messenger = tester.binding.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(
+          const MethodChannel('dev.fluttercommunity.plus/connectivity_status'),
+          (_) async => null,
+        );
 
-      await tester.pumpWidget(
-        const MaterialApp(home: CorporatePlantationScreen()),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('Restoration project'), findsOneWidget);
-      expect(find.textContaining('1 planting sessions saved'), findsOneWidget);
-      expect(api.recorded, isEmpty);
-      final preferences = await SharedPreferences.getInstance();
-      expect(preferences.containsKey(draftKey), isTrue);
+        await tester.pumpWidget(
+          const MaterialApp(home: CorporatePlantationScreen()),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Restoration project'), findsOneWidget);
+        expect(
+          find.textContaining('1 planting sessions saved'),
+          findsOneWidget,
+        );
+        expect(api.recorded, isEmpty);
+        final preferences = await SharedPreferences.getInstance();
+        expect(preferences.containsKey(draftKey), isTrue);
 
-      api.online = true;
-      await tester.tap(find.byTooltip('Refresh and send saved sessions'));
-      await tester.pumpAndSettle();
-      expect(api.recorded, ['retry-id']);
-      expect(preferences.containsKey(draftKey), isTrue);
-      expect(
-        jsonDecode(preferences.getString(draftKey)!)['sessionId'],
-        'saved-session',
-      );
-      expect(preferences.containsKey(otherAccountDraft), isTrue);
-      expect(find.textContaining('5 of 20 planted'), findsOneWidget);
-      expect(find.text('1 planting photo pending'), findsOneWidget);
-      expect(sync.pulls, 1);
+        api.online = true;
+        await tester.tap(find.byTooltip('Refresh and send saved sessions'));
+        await tester.pumpAndSettle();
+        expect(api.recorded, ['retry-id']);
+        expect(preferences.containsKey(draftKey), isTrue);
+        expect(
+          jsonDecode(preferences.getString(draftKey)!)['sessionId'],
+          'saved-session',
+        );
+        expect(preferences.containsKey(otherAccountDraft), isTrue);
+        expect(find.textContaining('5 of 20 planted'), findsOneWidget);
+        final pendingMessage = multiplePhotos
+            ? '2 planting photos pending'
+            : '1 planting photo pending';
+        expect(find.text(pendingMessage), findsOneWidget);
+        expect(sync.pulls, 1);
 
-      api.photoStorageOnline = true;
-      await tester.tap(find.byTooltip('Refresh and send saved sessions'));
-      await tester.pumpAndSettle();
-      expect(api.recorded, ['retry-id']);
-      expect(api.attachments, ['/api/v1/media/plantation_photo/photo']);
-      expect(preferences.containsKey(draftKey), isFalse);
-      expect(find.text('1 planting photo pending'), findsNothing);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+        api.photoStorageOnline = true;
+        await tester.tap(find.byTooltip('Refresh and send saved sessions'));
+        await tester.pumpAndSettle();
+        expect(api.recorded, ['retry-id']);
+        expect(api.attachments, [
+          '/api/v1/media/plantation_photo/photo-1',
+          if (multiplePhotos) '/api/v1/media/plantation_photo/photo-2',
+        ]);
+        expect(preferences.containsKey(draftKey), isFalse);
+        expect(find.text(pendingMessage), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
 }

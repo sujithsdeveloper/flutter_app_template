@@ -512,6 +512,17 @@ class _TaskCard extends StatelessWidget {
                             color: ColorConstants.lightTextSecondary,
                           ),
                         ),
+                        if (task.isPlantingBatch)
+                          Text(
+                            task.batchReviewLabel.isEmpty
+                                ? '${task.batchPlanted} of ${task.batchQuantity} trees planted'
+                                : task.batchReviewLabel,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: ColorConstants.forestGreen,
+                            ),
+                          ),
                         if (task.regionName != null &&
                             task.regionName!.isNotEmpty)
                           Text(

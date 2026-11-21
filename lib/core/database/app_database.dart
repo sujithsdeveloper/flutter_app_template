@@ -51,6 +51,7 @@ class AppDatabase {
 
   Future<void> _onCreate(Database db, int version) async {
     await _createTables(db);
+    await _createRapidCaptureTables(db);
     await _seedSampleData(db);
   }
 
@@ -153,10 +154,66 @@ class AppDatabase {
               'ALTER TABLE ${DbConstants.tableTrees} ADD COLUMN $column TEXT',
             );
           }
+        case 14:
+          await _createRapidCaptureTables(db);
+        case 15:
+          final columns = await db.rawQuery(
+            'PRAGMA table_info(${DbConstants.tableTreeTasks})',
+          );
+          for (final column in [
+            DbConstants.colBatchQuantity,
+            DbConstants.colBatchPlanted,
+          ]) {
+            if (columns.any((row) => row['name'] == column)) continue;
+            await db.execute(
+              'ALTER TABLE ${DbConstants.tableTreeTasks} ADD COLUMN $column INTEGER NOT NULL DEFAULT 0',
+            );
+          }
+        case 16:
+          final taskColumns = await db.rawQuery(
+            'PRAGMA table_info(${DbConstants.tableTreeTasks})',
+          );
+          if (!taskColumns.any(
+            (row) => row['name'] == DbConstants.colBatchReviewStatus,
+          )) {
+            await db.execute(
+              'ALTER TABLE ${DbConstants.tableTreeTasks} ADD COLUMN '
+              "${DbConstants.colBatchReviewStatus} TEXT NOT NULL DEFAULT ''",
+            );
+          }
         default:
           break;
       }
     }
+  }
+
+  Future<void> _createRapidCaptureTables(Database db) async {
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS rapid_runs (
+        id TEXT PRIMARY KEY,
+        account TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        state TEXT NOT NULL,
+        server_finished INTEGER NOT NULL DEFAULT 0
+      )
+    """);
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS rapid_trees (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES rapid_runs(id) ON DELETE CASCADE,
+        captured_at TEXT NOT NULL,
+        lat REAL,
+        lng REAL,
+        notes TEXT,
+        photo BLOB,
+        tree_synced INTEGER NOT NULL DEFAULT 0,
+        photo_synced INTEGER NOT NULL DEFAULT 0
+      )
+    """);
+    await db.execute(
+      "CREATE INDEX IF NOT EXISTS rapid_tree_run ON rapid_trees(run_id,captured_at)",
+    );
   }
 
   // ── Table creation ────────────────────────────────────────────────────────
@@ -344,6 +401,9 @@ class AppDatabase {
       ${DbConstants.colRegionId}      TEXT,
       ${DbConstants.colRegionName}    TEXT,
       ${DbConstants.colSponsorshipId} TEXT,
+      ${DbConstants.colBatchQuantity} INTEGER NOT NULL DEFAULT 0,
+      ${DbConstants.colBatchPlanted}  INTEGER NOT NULL DEFAULT 0,
+      ${DbConstants.colBatchReviewStatus} TEXT NOT NULL DEFAULT '',
       ${DbConstants.colTaskStatus}    TEXT NOT NULL DEFAULT 'pending',
       ${DbConstants.colSyncStatus}    TEXT NOT NULL DEFAULT 'synced',
       ${DbConstants.colRetryCount}    INTEGER NOT NULL DEFAULT 0,

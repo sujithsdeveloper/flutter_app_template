@@ -679,7 +679,11 @@ class _FieldWorkTaskCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      task.species.isNotEmpty ? task.species : t.planting,
+                      task.isPlantingBatch
+                          ? '${task.species} · ${task.batchPlanted}/${task.batchQuantity}'
+                          : task.species.isNotEmpty
+                          ? task.species
+                          : t.planting,
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -719,7 +723,11 @@ class _FieldWorkTaskCard extends StatelessWidget {
                           const SizedBox(width: 8),
                         ],
                         Flexible(
-                          child: _TaskStatusChip(status: task.taskStatus, t: t),
+                          child: _TaskStatusChip(
+                            status: task.taskStatus,
+                            review: task.batchReviewLabel,
+                            t: t,
+                          ),
                         ),
                       ],
                     ),
@@ -780,9 +788,14 @@ class _FieldWorkTaskCard extends StatelessWidget {
 }
 
 class _TaskStatusChip extends StatelessWidget {
-  const _TaskStatusChip({required this.status, required this.t});
+  const _TaskStatusChip({
+    required this.status,
+    required this.review,
+    required this.t,
+  });
 
   final TaskStatus status;
+  final String review;
   final AppText t;
 
   @override
@@ -790,7 +803,12 @@ class _TaskStatusChip extends StatelessWidget {
     final (label, color) = switch (status) {
       TaskStatus.pending => (t.taskStatusPending, ColorConstants.warningColor),
       TaskStatus.assigned => (t.assigned, ColorConstants.infoColor),
-      TaskStatus.planted => (t.planted, ColorConstants.successColor),
+      TaskStatus.planted => (
+        review.isEmpty ? t.planted : review,
+        review.isEmpty || review == 'Verified'
+            ? ColorConstants.successColor
+            : ColorConstants.warningColor,
+      ),
       TaskStatus.cancelled => ('Cancelled', ColorConstants.mutedText),
     };
 
@@ -940,14 +958,18 @@ class _TaskMiniRow extends StatelessWidget {
   Color get _color => switch (task.taskStatus) {
     TaskStatus.pending => ColorConstants.warningColor,
     TaskStatus.assigned => ColorConstants.infoColor,
-    TaskStatus.planted => ColorConstants.successColor,
+    TaskStatus.planted =>
+      task.batchReviewLabel.isEmpty || task.batchReviewStatus == 'verified'
+          ? ColorConstants.successColor
+          : ColorConstants.warningColor,
     TaskStatus.cancelled => ColorConstants.mutedText,
   };
 
   String _statusLabel() => switch (task.taskStatus) {
     TaskStatus.pending => t.unassigned,
     TaskStatus.assigned => t.assigned,
-    TaskStatus.planted => t.planted,
+    TaskStatus.planted =>
+      task.batchReviewLabel.isEmpty ? t.planted : task.batchReviewLabel,
     TaskStatus.cancelled => 'Cancelled',
   };
 
@@ -975,7 +997,11 @@ class _TaskMiniRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  task.species.isNotEmpty ? task.species : t.planting,
+                  task.isPlantingBatch
+                      ? '${task.species} · ${task.batchPlanted}/${task.batchQuantity}'
+                      : task.species.isNotEmpty
+                      ? task.species
+                      : t.planting,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 14.5,

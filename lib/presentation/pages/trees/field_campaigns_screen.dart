@@ -308,7 +308,11 @@ class _CampaignDetailState extends State<_CampaignDetail> {
 
   String _batchStatus(_Row batch) {
     if (_count(batch, 'planted') >= _count(batch, 'quantity')) {
-      return 'Completed';
+      return switch (batch['reviewStatus']) {
+        'pending' => 'Awaiting verification',
+        'rejected' => 'Review rejected',
+        _ => 'Completed',
+      };
     }
     if (batch['canRecord'] != true) return 'Closed';
     return _count(batch, 'planted') > 0 ? 'In progress' : 'Assigned';
@@ -393,6 +397,8 @@ class _CampaignDetailState extends State<_CampaignDetail> {
                 _filter('Batch status', _status, [
                   'Assigned',
                   'In progress',
+                  'Awaiting verification',
+                  'Review rejected',
                   'Completed',
                   'Closed',
                   'Unassigned quantity',
@@ -424,15 +430,22 @@ class _CampaignDetailState extends State<_CampaignDetail> {
     ValueChanged<String?> onChanged,
   ) {
     final values = choices.where((name) => name.isNotEmpty).toSet();
-    return DropdownButton<String>(
-      value: values.contains(value) ? value : '',
-      items: [
-        DropdownMenuItem(value: '', child: Text(label)),
-        for (final name in values)
-          DropdownMenuItem(value: name, child: Text(name)),
-      ],
-      onChanged: (selected) =>
-          onChanged(selected?.isEmpty == true ? null : selected),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 170),
+      child: DropdownButton<String>(
+        isExpanded: true,
+        value: values.contains(value) ? value : '',
+        items: [
+          DropdownMenuItem(value: '', child: Text(label)),
+          for (final name in values)
+            DropdownMenuItem(
+              value: name,
+              child: Text(name, overflow: TextOverflow.ellipsis),
+            ),
+        ],
+        onChanged: (selected) =>
+            onChanged(selected?.isEmpty == true ? null : selected),
+      ),
     );
   }
 
@@ -479,6 +492,7 @@ class _CampaignDetailState extends State<_CampaignDetail> {
               title: Text(_planter(batch)),
               subtitle: Text(
                 "${_batchStatus(batch)} · ${batch['planted']} / ${batch['quantity']} planted"
+                "${_count(batch, 'verificationPending') > 0 ? ' · ${batch['verificationPending']} to verify' : ''}"
                 "${_text(batch, 'targetDate').isEmpty ? '' : ' · Due ${batch['targetDate']}'}",
               ),
               trailing: row['canManage'] == true && batch['canRecord'] == true
@@ -539,9 +553,13 @@ class _BatchTreesScreen extends StatefulWidget {
 
 class _BatchTreesScreenState extends State<_BatchTreesScreen> {
   int _page = 1;
+  String _verification = '';
   late Future<_Row> _trees = _load();
-  Future<_Row> _load() =>
-      getIt<FieldApiService>().batchTrees(_text(widget.batch, 'id'), _page);
+  Future<_Row> _load() => getIt<FieldApiService>().batchTrees(
+    _text(widget.batch, 'id'),
+    _page,
+    verification: _verification,
+  );
 
   void _go(int page) => setState(() {
     _page = page;
@@ -573,9 +591,31 @@ class _BatchTreesScreenState extends State<_BatchTreesScreen> {
               _site(widget.batch),
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            if (rows.isEmpty) const Text('No planted trees in this batch yet.'),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final (filter, label) in [
+                  ('', 'All trees'),
+                  ('pending', 'Needs review'),
+                  ('verified', 'Verified'),
+                ])
+                  ChoiceChip(
+                    label: Text(label),
+                    selected: _verification == filter,
+                    onSelected: (_) {
+                      _verification = filter;
+                      _go(1);
+                    },
+                  ),
+              ],
+            ),
+            if (rows.isEmpty) const Text('No planted trees match this filter.'),
             for (final row in rows)
-              PlantedTreeTile(tree: TreeModel.fromFieldApi(row), t: language),
+              PlantedTreeTile(
+                tree: TreeModel.fromFieldApi(row),
+                t: language,
+                verification: row['verification'] as String?,
+              ),
             if (_count(data, 'total') > pageSize)
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
